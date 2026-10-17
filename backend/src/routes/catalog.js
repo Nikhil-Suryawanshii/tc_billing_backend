@@ -12,6 +12,7 @@ const {
   validateProductInput,
   normalizeProductListQuery,
 } = require('../utils/catalogValidation');
+const documentResponse = require('../utils/documentResponse');
 const { escapeRegex } = require('../utils/clientValidation');
 
 const router = express.Router();
@@ -40,7 +41,7 @@ router.get('/categories', async (req, res, next) => {
     const categories = await Category.find({ companyId: req.company._id })
       .sort({ isActive: -1, sortOrder: 1, name: 1 })
       .lean();
-    return res.json({ data: categories, message: 'Categories retrieved.' });
+    return res.json({ data: categories.map(documentResponse), message: 'Categories retrieved.' });
   } catch (error) {
     return next(error);
   }
@@ -51,7 +52,7 @@ router.post('/categories', async (req, res, next) => {
   if (Object.keys(errors).length) return sendValidationError(res, errors);
   try {
     const category = await Category.create({ ...updates, companyId: req.company._id });
-    return res.status(201).json({ data: category, message: 'Category created.' });
+    return res.status(201).json({ data: documentResponse(category), message: 'Category created.' });
   } catch (error) {
     if (error.code === 11000) {
       return sendValidationError(res, { name: 'A category with this name already exists.' });
@@ -93,7 +94,7 @@ router.get('/products', async (req, res, next) => {
 
   try {
     const products = await Product.find(filter).sort({ name: 1, createdAt: -1 }).lean();
-    return res.json({ data: products, message: 'Products retrieved.' });
+    return res.json({ data: products.map(documentResponse), message: 'Products retrieved.' });
   } catch (error) {
     return next(error);
   }
@@ -113,7 +114,7 @@ router.post('/products', async (req, res, next) => {
       }
     }
     const product = await Product.create({ ...updates, companyId: req.company._id });
-    return res.status(201).json({ data: product, message: 'Product created.' });
+    return res.status(201).json({ data: documentResponse(product), message: 'Product created.' });
   } catch (error) {
     if (error.code === 11000) {
       return sendValidationError(res, { sku: 'This SKU is already used by another product.' });
@@ -141,7 +142,7 @@ router.get('/categories/:id', async (req, res, next) => {
   try {
     const category = await findCategory(req);
     if (!category) return res.status(404).json({ data: null, message: 'Category not found.' });
-    return res.json({ data: category, message: 'Category retrieved.' });
+    return res.json({ data: documentResponse(category), message: 'Category retrieved.' });
   } catch (error) {
     return next(error);
   }
@@ -158,7 +159,7 @@ router.put('/categories/:id', async (req, res, next) => {
     if (!category) return res.status(404).json({ data: null, message: 'Category not found.' });
     Object.assign(category, updates);
     await category.save();
-    return res.json({ data: category, message: 'Category updated.' });
+    return res.json({ data: documentResponse(category), message: 'Category updated.' });
   } catch (error) {
     if (error.code === 11000) {
       return sendValidationError(res, { name: 'A category with this name already exists.' });
@@ -191,7 +192,7 @@ router.get('/products/:id', async (req, res, next) => {
   try {
     const product = await findProduct(req);
     if (!product) return res.status(404).json({ data: null, message: 'Product not found.' });
-    return res.json({ data: product, message: 'Product retrieved.' });
+    return res.json({ data: documentResponse(product), message: 'Product retrieved.' });
   } catch (error) {
     return next(error);
   }
@@ -217,7 +218,7 @@ router.put('/products/:id', async (req, res, next) => {
     if (!product) return res.status(404).json({ data: null, message: 'Product not found.' });
     Object.assign(product, updates);
     await product.save();
-    return res.json({ data: product, message: 'Product updated.' });
+    return res.json({ data: documentResponse(product), message: 'Product updated.' });
   } catch (error) {
     if (error.code === 11000) {
       return sendValidationError(res, { sku: 'This SKU is already used by another product.' });

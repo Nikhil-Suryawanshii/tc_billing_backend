@@ -31,6 +31,7 @@ Fields: name, sku, description, categoryId, unit, sellingPrice, costPrice, taxRa
 - `search` matches name and sku.
 - `categoryId` and `isActive` filter the list.
 - Inactive products stay readable by id so old documents can still show the name. The default list is active only. Pass `isActive=all` to see both.
+- Category and product responses include a string `id` alongside MongoDB's `_id`, including list responses used by edit forms.
 
 ## Steps
 
