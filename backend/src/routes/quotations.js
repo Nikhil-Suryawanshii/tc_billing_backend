@@ -10,6 +10,7 @@ const {
   updateQuotation,
 } = require('../services/quotations');
 const { escapeRegex } = require('../utils/clientValidation');
+const documentResponse = require('../utils/documentResponse');
 const { parseQuotationFilters, statusValues, validateQuotationInput } = require('../utils/quotationValidation');
 
 const router = express.Router();
@@ -19,7 +20,7 @@ function sendValidationError(res, errors) {
 }
 
 function displayQuotation(quotation) {
-  const data = typeof quotation.toObject === 'function' ? quotation.toObject() : quotation;
+  const data = documentResponse(quotation);
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const validUntil = data.validUntil ? new Date(data.validUntil) : null;

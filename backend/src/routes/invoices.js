@@ -11,6 +11,7 @@ const {
   updateDraftInvoice,
 } = require('../services/invoices');
 const { escapeRegex } = require('../utils/clientValidation');
+const documentResponse = require('../utils/documentResponse');
 const {
   validateInvoiceInput,
   validatePaymentInput,
@@ -48,7 +49,7 @@ function parseDateQuery(query, key, errors) {
 }
 
 function displayInvoice(invoice) {
-  const data = typeof invoice.toObject === 'function' ? invoice.toObject() : invoice;
+  const data = documentResponse(invoice);
   data.status = calculateInvoiceStatus(data);
   return data;
 }
