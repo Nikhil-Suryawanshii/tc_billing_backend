@@ -15,4 +15,12 @@ const productSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
 }, { timestamps: true, collection: 'products' });
 
+productSchema.index(
+  { companyId: 1, sku: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { sku: { $type: 'string', $gt: '' } },
+  },
+);
+
 module.exports = mongoose.models.Product || mongoose.model('Product', productSchema);
