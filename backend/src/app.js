@@ -11,7 +11,12 @@ app.use(cors({
 }));
 app.use(express.json());
 if (!process.env.VERCEL) {
-  app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
+  app.use('/uploads', (req, res, next) => {
+    if (req.path.startsWith('/pdfs/')) {
+      return res.status(404).json({ data: null, message: 'File not found.' });
+    }
+    return next();
+  }, express.static(path.resolve(__dirname, '../uploads')));
 }
 
 app.get('/', async (req, res) => {
