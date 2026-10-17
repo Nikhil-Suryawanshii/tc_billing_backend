@@ -140,10 +140,18 @@ function validateProductInput(body, { partial = false } = {}) {
   return { updates, errors };
 }
 
+function normalizeProductListQuery(query) {
+  const normalized = { ...query };
+  if (normalized.categoryId === '' || normalized.categoryId === 'all') delete normalized.categoryId;
+  if (normalized.isActive === '') delete normalized.isActive;
+  return normalized;
+}
+
 module.exports = {
   categoryFields,
   productFields,
   validateCategoryInput,
   validateProductInput,
   normalizeNonNegativeDecimal,
+  normalizeProductListQuery,
 };

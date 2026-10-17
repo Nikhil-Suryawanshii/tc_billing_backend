@@ -73,6 +73,16 @@ test('empty SKU is allowed while category IDs must be valid Mongo IDs or null', 
   });
 });
 
+test('product list category filters can use empty or all for the all-categories option', () => {
+  const { normalizeProductListQuery } = require('../src/utils/catalogValidation');
+  assert.deepEqual(normalizeProductListQuery({ search: '', categoryId: '' }), { search: '' });
+  assert.deepEqual(normalizeProductListQuery({ categoryId: 'all' }), {});
+  assert.deepEqual(normalizeProductListQuery({
+    categoryId: '0123456789abcdef01234567',
+    isActive: '',
+  }), { categoryId: '0123456789abcdef01234567' });
+});
+
 test('SKU has a partial unique index so empty values are not constrained', () => {
   const skuIndex = Product.schema.indexes().find(([keys]) => keys.companyId === 1 && keys.sku === 1);
   assert.ok(skuIndex);

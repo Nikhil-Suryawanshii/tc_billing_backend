@@ -7,7 +7,11 @@ const multer = require('multer');
 const connectDB = require('../config/db');
 const { Category, Company, Product } = require('../models');
 const { imageExtension, upload } = require('../middleware/companyUpload');
-const { validateCategoryInput, validateProductInput } = require('../utils/catalogValidation');
+const {
+  validateCategoryInput,
+  validateProductInput,
+  normalizeProductListQuery,
+} = require('../utils/catalogValidation');
 const { escapeRegex } = require('../utils/clientValidation');
 
 const router = express.Router();
@@ -59,28 +63,29 @@ router.post('/categories', async (req, res, next) => {
 router.get('/products', async (req, res, next) => {
   const errors = {};
   const filter = { companyId: req.company._id };
+  const query = normalizeProductListQuery(req.query);
 
-  if (req.query.search !== undefined) {
-    if (typeof req.query.search !== 'string') {
+  if (query.search !== undefined) {
+    if (typeof query.search !== 'string') {
       errors.search = 'Must be a string.';
-    } else if (req.query.search.trim()) {
-      const expression = new RegExp(escapeRegex(req.query.search.trim()), 'i');
+    } else if (query.search.trim()) {
+      const expression = new RegExp(escapeRegex(query.search.trim()), 'i');
       filter.$or = [{ name: expression }, { sku: expression }];
     }
   }
-  if (req.query.categoryId !== undefined) {
-    if (typeof req.query.categoryId !== 'string' || !mongoose.isValidObjectId(req.query.categoryId)) {
+  if (query.categoryId !== undefined) {
+    if (typeof query.categoryId !== 'string' || !mongoose.isValidObjectId(query.categoryId)) {
       errors.categoryId = 'Must be a valid category id.';
     } else {
-      filter.categoryId = req.query.categoryId;
+      filter.categoryId = query.categoryId;
     }
   }
-  if (req.query.isActive === undefined) {
+  if (query.isActive === undefined) {
     filter.isActive = true;
-  } else if (req.query.isActive === 'all') {
+  } else if (query.isActive === 'all') {
     // Explicitly include both active and inactive products.
-  } else if (req.query.isActive === 'true' || req.query.isActive === 'false') {
-    filter.isActive = req.query.isActive === 'true';
+  } else if (query.isActive === 'true' || query.isActive === 'false') {
+    filter.isActive = query.isActive === 'true';
   } else {
     errors.isActive = 'Must be "true", "false", or "all".';
   }
