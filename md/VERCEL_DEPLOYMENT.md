@@ -1,6 +1,6 @@
 # Deploy THE CONCEPT DESIGNERS on Vercel
 
-This guide deploys the Express API and, once it exists, the React app as **two Vercel projects** from this repository. MongoDB Atlas remains the database. The backend currently includes models, a seed script, and company settings routes. Client/catalog/document APIs, the frontend, persistent uploads, and PDF features are not implemented yet.
+This guide deploys the Express API and, once it exists, the React app as **two Vercel projects** from this repository. MongoDB Atlas remains the database. The backend includes models, a seed script, company and client routes, dashboard/reports, and local quotation/invoice PDF generation. Catalog/document CRUD APIs, the frontend, and persistent file storage are not implemented yet.
 
 The `backend/` and `frontend/` folders are siblings. Create two Vercel projects from the same Git repository: set the backend project's Root Directory to `backend` and the frontend project's Root Directory to `frontend`. Do not deploy this repository root as either app.
 
@@ -10,16 +10,16 @@ Browser → React app on Vercel → Express API on Vercel → MongoDB Atlas
                                  Vercel Blob
 ```
 
-## Before adding uploads and PDF features
+## Uploads and PDF storage
 
-The current backend can deploy its API and database-backed company settings. Company image upload endpoints intentionally return HTTP 503 on Vercel: the local upload implementation uses the function filesystem, which is not persistent. Implement persistent object storage before enabling uploads in production. PDF features are not implemented yet.
+Company image upload endpoints and quotation/invoice PDF generation intentionally return HTTP 503 on Vercel. Local uploads and generated PDFs use the function filesystem, which is not persistent. Implement persistent object storage before enabling these features in production.
 
 Before implementing those features for Vercel, account for:
 
 1. **Move persistent files to object storage.** Use Vercel Blob (or another persistent object store) for company logos, signatures, product images, and generated PDFs. Store the Blob URL or pathname in MongoDB. Use temporary `/tmp` only while generating a PDF, then upload it to Blob. Replace the local-file deletion and `/uploads` serving paths with Blob operations.
 2. **Choose Blob access deliberately.** Product images and logos can use a public Blob store. Use a separate private Blob store for quotations and invoices, and stream/download those through the API. Private Blob files require server-side access; public Blob files can be opened by anyone who has the URL.
 3. **Check existing upload files.** Move any existing PDFs/images that must be kept into persistent storage before excluding local uploads. Make sure private PDFs and `.env` files are not tracked in Git or included in a deployment. `backend/.vercelignore` already excludes `uploads/**`; local upload files will not be included in Vercel deployments.
-4. **Make PDF fonts Linux-compatible.** The PDF generator currently refers to fonts under `/System/Library/Fonts`, which is a macOS path and will not exist in Vercel's Linux runtime. Bundle appropriately licensed font files in `backend/assets/` and point the PDF generator to those files. Include a font with the rupee glyph so `₹` renders correctly.
+4. **Keep the PDF font available in Linux.** The PDF generator bundles DejaVu Sans through the `dejavu-fonts-ttf` dependency, including the rupee glyph. Preserve this dependency in production deployments or replace it with another bundled, appropriately licensed font.
 5. **Keep function startup free of local server work.** The backend exports its Express app for Vercel and only creates upload folders or calls `app.listen()` during local development. Vercel connects to MongoDB when an API route needs it. If the PDF generator needs a temporary file, use `/tmp` and then upload it to Blob.
 6. **Check upload payload limits.** Local company image uploads are limited to 4 MB, while Vercel Function request and response bodies are limited to 4.5 MB. Keep these limits in mind when designing direct-to-Blob uploads.
 7. **Keep the API private if it will contain real client data.** This app currently has no login and its `/api/v1` routes are open. A public Vercel URL therefore exposes the API to anyone who can reach it. Add authentication or configure access protection before storing real client or financial records.

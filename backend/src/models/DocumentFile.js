@@ -10,5 +10,10 @@ const documentFileSchema = new Schema({
   generatedAt: { type: Date, default: Date.now },
 }, { timestamps: true, collection: 'documentFiles' });
 
+documentFileSchema.index(
+  { companyId: 1, documentType: 1, documentId: 1 },
+  { unique: true },
+);
+
 module.exports = mongoose.models.DocumentFile
   || mongoose.model('DocumentFile', documentFileSchema);

@@ -85,6 +85,32 @@ implemented.
 Unknown or malformed client IDs return HTTP 404. Validation errors use HTTP 422
 and include field-level details in `errors`.
 
+## Dashboard and reports
+
+- `GET /api/v1/dashboard` returns company-scoped counts, balances, received
+  payments, recent quotations and invoices, monthly revenue, conversion counts,
+  and outstanding amounts by client.
+- `GET /api/v1/reports/:slug?from=YYYY-MM-DD&to=YYYY-MM-DD` returns rows,
+  summary values, and the selected range for `quotations`, `quotation-outcomes`,
+  `conversion`, `sales`, `payments`, `outstanding`, `overdue`, `clients`,
+  `products`, or `revenue`. Dates are optional; the default range is the latest
+  12 calendar months through today. Invalid dates or unsupported parameters
+  return HTTP 422.
+- `GET /api/v1/reports/:slug/export` downloads the same filtered rows as CSV.
+  Exports have headers even when no rows match and protect spreadsheet values
+  that could otherwise be interpreted as formulas.
+
+## Quotation and invoice PDFs
+
+- `GET /api/v1/quotations/:id/pdf`
+- `GET /api/v1/invoices/:id/pdf`
+
+Both routes generate an A4 PDF from the saved document snapshots, return it as
+an attachment, and save a versioned copy under `uploads/pdfs/` with a matching
+`documentFiles` record. Generated PDFs are not served from the public uploads
+route. PDF generation is unavailable on Vercel until persistent object storage
+is configured because Vercel function filesystems are temporary.
+
 ## Vercel
 
 Create a Vercel project with this directory as its Root Directory and select the
