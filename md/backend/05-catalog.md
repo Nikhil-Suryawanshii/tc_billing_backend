@@ -14,7 +14,7 @@ A catalog React can search while building a document. Custom quotation lines do 
 | GET, POST | `/api/v1/categories` |
 | GET, PUT, DELETE | `/api/v1/categories/{id}` |
 
-Fields: name, description, isActive, sortOrder. List active categories first, ordered by `sortOrder`. Deleting a category that products still use returns `422`.
+Fields: name, description, isActive, sortOrder, parentId, defaultPrice. Parent categories must belong to the same company and cannot introduce a circular hierarchy. List active categories first, ordered by `sortOrder`. Deleting a category that products still use returns `422`.
 
 ## Product routes
 

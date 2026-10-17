@@ -1,7 +1,7 @@
 const Decimal = require('decimal.js');
 const validator = require('validator');
 
-const categoryFields = ['name', 'description', 'isActive', 'sortOrder'];
+const categoryFields = ['parentId', 'name', 'description', 'defaultPrice', 'isActive', 'sortOrder'];
 const productFields = [
   'name',
   'sku',
@@ -46,9 +46,27 @@ function validateCategoryInput(body, { partial = false } = {}) {
     }
   }
 
+  if (Object.hasOwn(body, 'parentId')) {
+    if (body.parentId === null || body.parentId === '') {
+      updates.parentId = null;
+    } else if (typeof body.parentId !== 'string' || !validator.isMongoId(body.parentId)) {
+      errors.parentId = 'Must be a valid parent category id or null.';
+    } else {
+      updates.parentId = body.parentId;
+    }
+  }
+
   if (Object.hasOwn(body, 'description')) {
     if (typeof body.description !== 'string') errors.description = 'Must be a string.';
     else updates.description = body.description.trim();
+  }
+
+  if (Object.hasOwn(body, 'defaultPrice')) {
+    try {
+      updates.defaultPrice = normalizeNonNegativeDecimal(body.defaultPrice, 'defaultPrice', 2);
+    } catch (error) {
+      errors.defaultPrice = error.message;
+    }
   }
 
   if (Object.hasOwn(body, 'isActive')) {

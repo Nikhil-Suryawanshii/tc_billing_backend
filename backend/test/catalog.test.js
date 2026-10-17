@@ -24,6 +24,36 @@ test('category input validates required names and typed updates', () => {
   });
 });
 
+test('category updates accept hierarchy, price, and returned read-only metadata', () => {
+  const parentId = '0123456789abcdef01234567';
+  const categoryId = '1123456789abcdef01234567';
+  const result = validateCategoryInput({
+    _id: categoryId,
+    id: categoryId,
+    companyId: 'ignored',
+    createdAt: '2026-10-14T06:08:05.963Z',
+    updatedAt: '2026-10-14T06:08:06.021Z',
+    __v: 0,
+    parentId,
+    name: '  Kitchen service  ',
+    defaultPrice: '1999.50',
+    isActive: 'false',
+  }, { partial: true });
+
+  assert.deepEqual(result, {
+    updates: {
+      parentId,
+      name: 'Kitchen service',
+      defaultPrice: '1999.50',
+      isActive: false,
+    },
+    errors: {},
+  });
+  assert.deepEqual(validateCategoryInput({ defaultPrice: '-1' }, { partial: true }).errors, {
+    defaultPrice: 'defaultPrice must be a non-negative decimal value.',
+  });
+});
+
 test('product money uses fixed decimal strings and tax rate remains decimal-safe', () => {
   const result = validateProductInput({
     name: 'Sofa',
@@ -117,4 +147,14 @@ test('SKU has a partial unique index so empty values are not constrained', () =>
   assert.equal(Category.schema.indexes().some(([keys, options]) => (
     keys.companyId === 1 && keys.name === 1 && options.unique
   )), true);
+});
+
+test('category default prices use the same fixed-decimal money format as products', () => {
+  const category = new Category({
+    companyId: new mongoose.Types.ObjectId(),
+    name: 'Kitchen',
+    defaultPrice: '1999.5',
+  });
+  assert.equal(category.defaultPrice, '1999.50');
+  assert.equal(category.parentId, null);
 });

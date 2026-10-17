@@ -22,6 +22,28 @@ function sendValidationError(res, errors) {
   return res.status(422).json({ data: null, message: 'Validation failed.', errors });
 }
 
+async function validateCategoryParent(parentId, companyId, categoryId) {
+  if (!parentId) return null;
+
+  const visited = new Set();
+  let currentId = parentId;
+  while (currentId) {
+    const currentIdString = String(currentId);
+    if (currentIdString === String(categoryId)) {
+      return 'A category cannot be its own ancestor.';
+    }
+    if (visited.has(currentIdString)) {
+      return 'The selected parent category has a circular parent reference.';
+    }
+    visited.add(currentIdString);
+
+    const parent = await Category.findOne({ _id: currentId, companyId }).select('_id parentId').lean();
+    if (!parent) return 'Parent category not found for this company.';
+    currentId = parent.parentId;
+  }
+  return null;
+}
+
 router.use(['/categories', '/products'], async (req, res, next) => {
   try {
     await connectDB();
@@ -51,6 +73,8 @@ router.post('/categories', async (req, res, next) => {
   const { updates, errors } = validateCategoryInput(req.body);
   if (Object.keys(errors).length) return sendValidationError(res, errors);
   try {
+    const parentError = await validateCategoryParent(updates.parentId, req.company._id);
+    if (parentError) return sendValidationError(res, { parentId: parentError });
     const category = await Category.create({ ...updates, companyId: req.company._id });
     return res.status(201).json({ data: documentResponse(category), message: 'Category created.' });
   } catch (error) {
@@ -157,6 +181,14 @@ router.put('/categories/:id', async (req, res, next) => {
   try {
     const category = await findCategory(req);
     if (!category) return res.status(404).json({ data: null, message: 'Category not found.' });
+    if (Object.hasOwn(updates, 'parentId')) {
+      const parentError = await validateCategoryParent(
+        updates.parentId,
+        req.company._id,
+        category._id,
+      );
+      if (parentError) return sendValidationError(res, { parentId: parentError });
+    }
     Object.assign(category, updates);
     await category.save();
     return res.json({ data: documentResponse(category), message: 'Category updated.' });
