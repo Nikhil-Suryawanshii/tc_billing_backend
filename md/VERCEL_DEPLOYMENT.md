@@ -12,7 +12,7 @@ Browser → React app on Vercel → Express API on Vercel → MongoDB Atlas
 
 ## Before adding uploads and PDF features
 
-The current backend can deploy its API, company settings, clients, categories, products, quotations, invoices, and payments. Company/product image upload and PDF generation endpoints intentionally return HTTP 503 on Vercel: their local implementations use the function filesystem, which is not persistent. Implement persistent object storage before enabling these endpoints in production.
+The current backend can deploy its API and database-backed company settings. Company image upload endpoints intentionally return HTTP 503 on Vercel: the local upload implementation uses the function filesystem, which is not persistent. Implement persistent object storage before enabling uploads in production. PDF features are not implemented yet.
 
 Before implementing those features for Vercel, account for:
 

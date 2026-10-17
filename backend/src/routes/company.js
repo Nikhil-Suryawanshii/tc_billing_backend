@@ -155,7 +155,7 @@ async function replaceCompanyImage(req, res, next, field) {
 
     if (previousPath) {
       const previousFilename = path.basename(previousPath);
-      if (previousFilename && previousPath === `/uploads/company/${previousFilename}`) {
+      if (previousPath === `/uploads/company/${previousFilename}`) {
         await fs.unlink(path.join(companyUploadsDirectory, previousFilename)).catch((error) => {
           if (error.code !== 'ENOENT') throw error;
         });
