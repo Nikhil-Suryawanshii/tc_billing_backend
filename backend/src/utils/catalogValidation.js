@@ -13,11 +13,14 @@ const productFields = [
   'taxRate',
   'isActive',
 ];
+const readOnlyFields = ['id', '_id', 'companyId', 'createdAt', 'updatedAt', '__v', 'imagePath'];
 
-function validateFields(body, allowedFields) {
+function validateFields(body, allowedFields, partial) {
   const errors = {};
   for (const field of Object.keys(body)) {
-    if (field !== 'companyId' && !allowedFields.includes(field)) {
+    if (field !== 'companyId'
+      && !(partial && readOnlyFields.includes(field))
+      && !allowedFields.includes(field)) {
       errors[field] = 'This field cannot be updated.';
     }
   }
@@ -32,7 +35,7 @@ function validateCategoryInput(body, { partial = false } = {}) {
     return { updates, errors: { body: 'Request body must be a JSON object.' } };
   }
 
-  Object.assign(errors, validateFields(body, categoryFields));
+  Object.assign(errors, validateFields(body, categoryFields, partial));
   if (!partial && !Object.hasOwn(body, 'name')) errors.name = 'Name is required.';
 
   if (Object.hasOwn(body, 'name')) {
@@ -91,7 +94,7 @@ function validateProductInput(body, { partial = false } = {}) {
     return { updates, errors: { body: 'Request body must be a JSON object.' } };
   }
 
-  Object.assign(errors, validateFields(body, productFields));
+  Object.assign(errors, validateFields(body, productFields, partial));
   if (!partial && !Object.hasOwn(body, 'name')) errors.name = 'Name is required.';
 
   for (const field of ['name', 'sku', 'description', 'unit']) {
@@ -132,8 +135,13 @@ function validateProductInput(body, { partial = false } = {}) {
   }
 
   if (Object.hasOwn(body, 'isActive')) {
-    if (typeof body.isActive !== 'boolean') errors.isActive = 'Must be a boolean.';
-    else updates.isActive = body.isActive;
+    if (typeof body.isActive === 'boolean') {
+      updates.isActive = body.isActive;
+    } else if (body.isActive === 'true' || body.isActive === 'false') {
+      updates.isActive = body.isActive === 'true';
+    } else {
+      errors.isActive = 'Must be a boolean.';
+    }
   }
 
   for (const field of Object.keys(errors)) delete updates[field];

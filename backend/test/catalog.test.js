@@ -73,6 +73,26 @@ test('empty SKU is allowed while category IDs must be valid Mongo IDs or null', 
   });
 });
 
+test('product updates accept serialized records and boolean form values', () => {
+  const { updates, errors } = validateProductInput({
+    _id: '0123456789abcdef01234567',
+    id: '0123456789abcdef01234567',
+    companyId: 'ignored',
+    createdAt: '2026-10-14T06:08:05.963Z',
+    updatedAt: '2026-10-14T06:08:06.021Z',
+    __v: 0,
+    imagePath: '/uploads/products/image.png',
+    name: '  Updated product  ',
+    isActive: 'false',
+  }, { partial: true });
+
+  assert.deepEqual(updates, { name: 'Updated product', isActive: false });
+  assert.deepEqual(errors, {});
+  assert.deepEqual(validateProductInput({ isActive: 'yes' }, { partial: true }).errors, {
+    isActive: 'Must be a boolean.',
+  });
+});
+
 test('product list category filters can use empty or all for the all-categories option', () => {
   const { normalizeProductListQuery } = require('../src/utils/catalogValidation');
   assert.deepEqual(normalizeProductListQuery({ search: '', categoryId: '' }), { search: '' });
