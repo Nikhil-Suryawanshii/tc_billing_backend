@@ -22,11 +22,19 @@ async function buildReport(req, res, next) {
   if (!reportSlugs.includes(req.params.slug)) {
     return res.status(404).json({ data: null, message: 'Report not found.' });
   }
+  const query = { ...req.query };
+  if (query.from === undefined && query.dateFrom !== undefined) query.from = query.dateFrom;
+  if (query.to === undefined && query.dateTo !== undefined) query.to = query.dateTo;
+  delete query.dateFrom;
+  delete query.dateTo;
+  for (const [key, value] of Object.entries(query)) {
+    if (value === '') delete query[key];
+  }
   const errors = {};
-  for (const key of Object.keys(req.query)) {
+  for (const key of Object.keys(query)) {
     if (!['from', 'to'].includes(key)) errors[key] = 'Unsupported query parameter.';
   }
-  const { filters, errors: filterErrors } = parseReportFilters(req.query);
+  const { filters, errors: filterErrors } = parseReportFilters(query);
   Object.assign(errors, filterErrors);
   if (Object.keys(errors).length) {
     return res.status(422).json({ data: null, message: 'Validation failed.', errors });

@@ -189,36 +189,39 @@ function validateQuotationInput(body, { partial = false } = {}) {
 }
 
 function parseQuotationFilters(query) {
+  const normalizedQuery = Object.fromEntries(
+    Object.entries(query).filter(([, value]) => value !== ''),
+  );
   const errors = {};
   const allowedQueryFields = new Set([
     'search', 'status', 'clientId', 'dateFrom', 'dateTo', 'amountMin', 'amountMax',
     'sort', 'page', 'perPage', 'archived',
   ]);
-  for (const field of Object.keys(query)) {
+  for (const field of Object.keys(normalizedQuery)) {
     if (!allowedQueryFields.has(field)) errors[field] = 'Unsupported query parameter.';
   }
   const parseInteger = (field, fallback, max = 1000000) => {
-    if (query[field] === undefined) return fallback;
-    if (typeof query[field] !== 'string' || !/^[1-9]\d*$/.test(query[field]) || Number(query[field]) > max) {
+    if (normalizedQuery[field] === undefined) return fallback;
+    if (typeof normalizedQuery[field] !== 'string' || !/^[1-9]\d*$/.test(normalizedQuery[field]) || Number(normalizedQuery[field]) > max) {
       errors[field] = `Must be an integer between 1 and ${max}.`;
       return fallback;
     }
-    return Number(query[field]);
+    return Number(normalizedQuery[field]);
   };
   const page = parseInteger('page', 1);
   const perPage = parseInteger('perPage', 20, 100);
-  if (query.search !== undefined && typeof query.search !== 'string') errors.search = 'Must be a string.';
-  if (query.status !== undefined && !statusValues.includes(query.status)) {
+  if (normalizedQuery.search !== undefined && typeof normalizedQuery.search !== 'string') errors.search = 'Must be a string.';
+  if (normalizedQuery.status !== undefined && !statusValues.includes(normalizedQuery.status)) {
     errors.status = `Must be one of: ${statusValues.join(', ')}.`;
   }
-  if (query.clientId !== undefined
-    && (typeof query.clientId !== 'string' || !mongoose.isValidObjectId(query.clientId))) {
+  if (normalizedQuery.clientId !== undefined
+    && (typeof normalizedQuery.clientId !== 'string' || !mongoose.isValidObjectId(normalizedQuery.clientId))) {
     errors.clientId = 'Must be a valid client id.';
   }
   const dates = {};
   for (const field of ['dateFrom', 'dateTo']) {
-    if (query[field] === undefined) continue;
-    const value = typeof query[field] === 'string' ? new Date(query[field]) : null;
+    if (normalizedQuery[field] === undefined) continue;
+    const value = typeof normalizedQuery[field] === 'string' ? new Date(normalizedQuery[field]) : null;
     if (!value || Number.isNaN(value.getTime())) errors[field] = 'Must be a valid date.';
     else dates[field] = value;
   }
@@ -226,9 +229,9 @@ function parseQuotationFilters(query) {
     errors.dateTo = 'Must be on or after dateFrom.';
   }
   for (const field of ['amountMin', 'amountMax']) {
-    if (query[field] === undefined) continue;
+    if (normalizedQuery[field] === undefined) continue;
     try {
-      dates[field] = normalizeNonNegativeDecimal(query[field], field, 2);
+      dates[field] = normalizeNonNegativeDecimal(normalizedQuery[field], field, 2);
     } catch (error) {
       errors[field] = error.message;
     }
@@ -237,10 +240,10 @@ function parseQuotationFilters(query) {
     && Number(dates.amountMin) > Number(dates.amountMax)) {
     errors.amountMax = 'Must be greater than or equal to amountMin.';
   }
-  if (query.sort !== undefined && !defaultSorts.includes(query.sort)) {
+  if (normalizedQuery.sort !== undefined && !defaultSorts.includes(normalizedQuery.sort)) {
     errors.sort = `Must be one of: ${defaultSorts.join(', ')}.`;
   }
-  if (query.archived !== undefined && !['1', '0'].includes(query.archived)) {
+  if (normalizedQuery.archived !== undefined && !['1', '0'].includes(normalizedQuery.archived)) {
     errors.archived = 'Must be 1 or 0.';
   }
   return {
@@ -248,11 +251,11 @@ function parseQuotationFilters(query) {
     filters: {
       page,
       perPage,
-      sort: query.sort || 'newest',
-      archived: query.archived === '1',
-      search: typeof query.search === 'string' ? query.search.trim() : '',
-      status: query.status,
-      clientId: query.clientId,
+      sort: normalizedQuery.sort || 'newest',
+      archived: normalizedQuery.archived === '1',
+      search: typeof normalizedQuery.search === 'string' ? normalizedQuery.search.trim() : '',
+      status: normalizedQuery.status,
+      clientId: normalizedQuery.clientId,
       ...dates,
     },
   };

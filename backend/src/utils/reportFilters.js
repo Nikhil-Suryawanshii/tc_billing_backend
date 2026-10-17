@@ -25,7 +25,7 @@ const reportColumns = {
 };
 
 function parseDate(value, field, errors) {
-  if (value === undefined) return undefined;
+  if (value === undefined || value === '') return undefined;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     errors[field] = 'Must be a date in YYYY-MM-DD format.';
     return undefined;

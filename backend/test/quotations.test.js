@@ -90,3 +90,22 @@ test('quotation filter parser validates ranges and exposes supported sort modes'
   const invalid = parseQuotationFilters({ amountMin: '21', amountMax: '20', perPage: '101' });
   assert.deepEqual(Object.keys(invalid.errors).sort(), ['amountMax', 'perPage']);
 });
+
+test('quotation filters treat empty optional frontend values as unset', () => {
+  const result = parseQuotationFilters({
+    search: '',
+    status: '',
+    dateFrom: '',
+    dateTo: '',
+    amountMin: '',
+    amountMax: '',
+    sort: '',
+    archived: '',
+    page: '1',
+  });
+  assert.deepEqual(result.errors, {});
+  assert.equal(result.filters.page, 1);
+  assert.equal(result.filters.sort, 'newest');
+  assert.equal(result.filters.status, undefined);
+  assert.equal(result.filters.search, '');
+});

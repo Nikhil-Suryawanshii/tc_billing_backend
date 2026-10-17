@@ -127,4 +127,17 @@ function validatePaymentInput(body) {
   return { updates, errors };
 }
 
-module.exports = { validateInvoiceInput, validatePaymentInput };
+function normalizeInvoiceListQuery(query) {
+  const normalized = { ...query };
+  if (normalized.invoiceDateFrom === undefined && normalized.dateFrom !== undefined) {
+    normalized.invoiceDateFrom = normalized.dateFrom;
+  }
+  if (normalized.invoiceDateTo === undefined && normalized.dateTo !== undefined) {
+    normalized.invoiceDateTo = normalized.dateTo;
+  }
+  delete normalized.dateFrom;
+  delete normalized.dateTo;
+  return Object.fromEntries(Object.entries(normalized).filter(([, value]) => value !== ''));
+}
+
+module.exports = { validateInvoiceInput, validatePaymentInput, normalizeInvoiceListQuery };

@@ -23,6 +23,7 @@ test('report filters default to twelve months and validate dates and range order
   assert.equal(invalidDate.errors.from, 'Must be a valid date in YYYY-MM-DD format.');
   const reversedRange = parseReportFilters({ from: '2026-02-02', to: '2026-02-01' });
   assert.equal(reversedRange.errors.to, 'Must be on or after from.');
+  assert.deepEqual(parseReportFilters({ from: '', to: '' }, new Date('2026-10-18T10:00:00.000Z')).errors, {});
 });
 
 test('CSV export includes payment amounts, quotes fields, and neutralizes formulas', () => {

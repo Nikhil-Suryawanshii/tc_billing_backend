@@ -11,7 +11,11 @@ const {
   updateDraftInvoice,
 } = require('../services/invoices');
 const { escapeRegex } = require('../utils/clientValidation');
-const { validateInvoiceInput, validatePaymentInput } = require('../utils/invoiceValidation');
+const {
+  validateInvoiceInput,
+  validatePaymentInput,
+  normalizeInvoiceListQuery,
+} = require('../utils/invoiceValidation');
 
 const router = express.Router();
 const invoiceStatuses = ['Draft', 'Issued', 'Partially Paid', 'Paid', 'Overdue', 'Cancelled'];
@@ -83,27 +87,28 @@ router.use(async (req, res, next) => {
 });
 
 router.get('/', async (req, res, next) => {
+  const filters = normalizeInvoiceListQuery(req.query);
   const errors = {};
-  const page = parseInteger(req.query.page, 1, 'page', errors, 1000000);
-  const perPage = parseInteger(req.query.perPage, 20, 'perPage', errors, 100);
+  const page = parseInteger(filters.page, 1, 'page', errors, 1000000);
+  const perPage = parseInteger(filters.perPage, 20, 'perPage', errors, 100);
   const allowed = ['invoiceDateFrom', 'invoiceDateTo', 'dueDateFrom', 'dueDateTo', 'clientId', 'status', 'search', 'page', 'perPage'];
-  for (const key of Object.keys(req.query)) {
+  for (const key of Object.keys(filters)) {
     if (!allowed.includes(key)) errors[key] = 'Unsupported query parameter.';
   }
-  if (req.query.clientId !== undefined
-    && (typeof req.query.clientId !== 'string' || !mongoose.isValidObjectId(req.query.clientId))) {
+  if (filters.clientId !== undefined
+    && (typeof filters.clientId !== 'string' || !mongoose.isValidObjectId(filters.clientId))) {
     errors.clientId = 'Must be a valid client id.';
   }
-  if (req.query.status !== undefined && !invoiceStatuses.includes(req.query.status)) {
+  if (filters.status !== undefined && !invoiceStatuses.includes(filters.status)) {
     errors.status = `Must be one of: ${invoiceStatuses.join(', ')}.`;
   }
-  if (req.query.search !== undefined && typeof req.query.search !== 'string') {
+  if (filters.search !== undefined && typeof filters.search !== 'string') {
     errors.search = 'Must be a string.';
   }
-  const invoiceDateFrom = parseDateQuery(req.query, 'invoiceDateFrom', errors);
-  const invoiceDateTo = parseDateQuery(req.query, 'invoiceDateTo', errors);
-  const dueDateFrom = parseDateQuery(req.query, 'dueDateFrom', errors);
-  const dueDateTo = parseDateQuery(req.query, 'dueDateTo', errors);
+  const invoiceDateFrom = parseDateQuery(filters, 'invoiceDateFrom', errors);
+  const invoiceDateTo = parseDateQuery(filters, 'invoiceDateTo', errors);
+  const dueDateFrom = parseDateQuery(filters, 'dueDateFrom', errors);
+  const dueDateTo = parseDateQuery(filters, 'dueDateTo', errors);
   if (invoiceDateFrom && invoiceDateTo && invoiceDateFrom > invoiceDateTo) {
     errors.invoiceDateTo = 'Must be on or after invoiceDateFrom.';
   }
@@ -113,15 +118,15 @@ router.get('/', async (req, res, next) => {
   if (Object.keys(errors).length) return sendValidationError(res, errors);
 
   const query = { companyId: req.company._id };
-  if (req.query.clientId) query.clientId = req.query.clientId;
-  if (req.query.status === 'Overdue') {
+  if (filters.clientId) query.clientId = filters.clientId;
+  if (filters.status === 'Overdue') {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
     query.status = { $in: ['Issued', 'Partially Paid', 'Overdue'] };
     query.dueDate = { $lt: today };
     query.balanceDue = { $gt: '0.00' };
-  } else if (req.query.status) {
-    query.status = req.query.status;
+  } else if (filters.status) {
+    query.status = filters.status;
   }
   if (invoiceDateFrom || invoiceDateTo) {
     query.invoiceDate = {};
@@ -141,8 +146,8 @@ router.get('/', async (req, res, next) => {
   }
 
   try {
-    if (req.query.search) {
-      const expression = new RegExp(escapeRegex(req.query.search.trim()), 'i');
+    if (filters.search) {
+      const expression = new RegExp(escapeRegex(filters.search.trim()), 'i');
       const clients = await Client.find({ companyId: req.company._id, name: expression })
         .select('_id').lean();
       query.$or = [

@@ -1,7 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { calculateInvoiceStatus } = require('../src/services/invoices');
-const { validateInvoiceInput, validatePaymentInput } = require('../src/utils/invoiceValidation');
+const {
+  validateInvoiceInput,
+  validatePaymentInput,
+  normalizeInvoiceListQuery,
+} = require('../src/utils/invoiceValidation');
 
 test('invoice create requires client, invoice date, due date, and items', () => {
   const result = validateInvoiceInput({});
@@ -78,4 +82,21 @@ test('invoice status follows payment totals, due date, and cancellation', () => 
     balanceDue: '0.00',
   }, today), 'Paid');
   assert.equal(calculateInvoiceStatus({ ...base, status: 'Cancelled' }, today), 'Cancelled');
+});
+
+test('invoice list accepts frontend dateFrom/dateTo names and ignores empty optional filters', () => {
+  assert.deepEqual(normalizeInvoiceListQuery({
+    search: '',
+    status: '',
+    page: '1',
+    dateFrom: '',
+    dateTo: '',
+  }), { page: '1' });
+  assert.deepEqual(normalizeInvoiceListQuery({
+    dateFrom: '2026-10-01',
+    dateTo: '2026-10-18',
+  }), {
+    invoiceDateFrom: '2026-10-01',
+    invoiceDateTo: '2026-10-18',
+  });
 });
