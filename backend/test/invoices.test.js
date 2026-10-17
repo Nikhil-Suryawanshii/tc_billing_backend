@@ -36,6 +36,32 @@ test('invoice payload validates dates and keeps exact decimal strings', () => {
   assert.equal(result.updates.dueDate.toISOString().slice(0, 10), '2026-11-18');
 });
 
+test('invoice update ignores immutable metadata and calculated totals from the loaded record', () => {
+  const result = validateInvoiceInput({
+    _id: '0123456789abcdef01234567',
+    id: '0123456789abcdef01234567',
+    companyId: '0123456789abcdef01234567',
+    number: 'INV 1',
+    status: 'Draft',
+    subtotal: '100.00',
+    grandTotal: '118.00',
+    amountPaid: '0.00',
+    balanceDue: '118.00',
+    payments: [],
+    items: [{
+      name: 'Cabinet',
+      quantity: '1',
+      unitPrice: '100.00',
+      taxRate: '18',
+      lineSubtotal: '100.00',
+      lineTotal: '118.00',
+    }],
+  }, { partial: true });
+  assert.deepEqual(result.errors, {});
+  assert.equal(result.updates.grandTotal, undefined);
+  assert.equal(result.updates.items[0].lineTotal, undefined);
+});
+
 test('payment amount must be positive and date/metadata are validated', () => {
   assert.deepEqual(validatePaymentInput({
     amount: '0.00',

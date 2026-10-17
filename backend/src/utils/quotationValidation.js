@@ -16,6 +16,11 @@ const quotationTextFields = [
   'notes',
   'validityText',
 ];
+const readOnlyQuotationFields = [
+  'id', '_id', 'companyId', 'number', 'status', 'companySnapshot', 'clientSnapshot',
+  'subtotal', 'discountTotal', 'taxableAmount', 'taxTotal', 'grandTotal',
+  'convertedInvoiceId', 'archivedAt', 'createdAt', 'updatedAt', '__v',
+];
 const statusValues = ['Draft', 'Sent', 'Accepted', 'Rejected', 'Expired', 'Converted'];
 const defaultSorts = ['newest', 'oldest', 'amountAsc', 'amountDesc', 'numberAsc', 'numberDesc'];
 
@@ -36,7 +41,10 @@ function validateQuotationInput(body, { partial = false } = {}) {
     return { updates, errors: { body: 'Request body must be a JSON object.' } };
   }
   for (const field of Object.keys(body)) {
-    if (!allowedFields.has(field)) errors[field] = 'This field cannot be updated.';
+    if (!allowedFields.has(field)
+      && !(partial && readOnlyQuotationFields.includes(field))) {
+      errors[field] = 'This field cannot be updated.';
+    }
   }
 
   if (!partial && !body.clientId && !body.name) {
@@ -117,6 +125,7 @@ function validateQuotationInput(body, { partial = false } = {}) {
         const allowedItemFields = [
           'name', 'description', 'sectionHeading', 'productId', 'categoryId',
           'quantity', 'unit', 'unitPrice', 'discountAmount', 'taxRate', 'sortOrder',
+          'lineSubtotal', 'lineTotal',
         ];
         for (const field of Object.keys(item)) {
           if (!allowedItemFields.includes(field)) itemErrors[field] = 'This field cannot be updated.';
@@ -169,7 +178,7 @@ function validateQuotationInput(body, { partial = false } = {}) {
     errors.items = 'Items are required and must be an array.';
   }
 
-  if (Object.hasOwn(body, 'status')) {
+  if (Object.hasOwn(body, 'status') && !partial) {
     if (!statusValues.includes(body.status)) {
       errors.status = `Must be one of: ${statusValues.join(', ')}.`;
     } else if (body.status === 'Converted') {

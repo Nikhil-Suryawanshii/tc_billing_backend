@@ -14,7 +14,11 @@ test('category input validates required names and typed updates', () => {
     errors: {},
   });
   assert.deepEqual(validateCategoryInput({ name: ' ' }).errors, { name: 'Name is required.' });
-  assert.deepEqual(validateCategoryInput({ isActive: 'false' }).errors, {
+  assert.deepEqual(validateCategoryInput({ isActive: 'false' }), {
+    updates: { isActive: false },
+    errors: { name: 'Name is required.' },
+  });
+  assert.deepEqual(validateCategoryInput({ isActive: 'yes' }).errors, {
     name: 'Name is required.',
     isActive: 'Must be a boolean.',
   });

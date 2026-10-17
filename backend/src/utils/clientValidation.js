@@ -14,6 +14,7 @@ const clientFields = [
   'country',
   'notes',
 ];
+const readOnlyClientFields = ['id', '_id', 'createdAt', 'updatedAt', '__v'];
 
 function validateClientInput(body, { partial = false } = {}) {
   const errors = {};
@@ -25,6 +26,7 @@ function validateClientInput(body, { partial = false } = {}) {
 
   for (const field of Object.keys(body)) {
     if (field === 'companyId') continue;
+    if (partial && readOnlyClientFields.includes(field)) continue;
     if (!clientFields.includes(field)) {
       errors[field] = 'This field cannot be updated.';
     }

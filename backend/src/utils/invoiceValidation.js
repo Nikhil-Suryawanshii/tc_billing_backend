@@ -8,6 +8,12 @@ const invoiceTextFields = [
   'poSoNumber', 'header', 'currency', 'salutation', 'message', 'closing',
   'signatory', 'terms', 'notes', 'paymentTerms',
 ];
+const readOnlyInvoiceFields = [
+  'id', '_id', 'companyId', 'number', 'status', 'quotationId', 'quotationDate',
+  'validUntil', 'companySnapshot', 'clientSnapshot', 'subtotal', 'discountTotal',
+  'taxableAmount', 'taxTotal', 'grandTotal', 'amountPaid', 'balanceDue',
+  'cancelledAt', 'payments', 'createdAt', 'updatedAt', '__v',
+];
 
 function validateInvoiceInput(body, { partial = false } = {}) {
   const errors = {};
@@ -20,7 +26,10 @@ function validateInvoiceInput(body, { partial = false } = {}) {
     return { updates, errors: { body: 'Request body must be a JSON object.' } };
   }
   for (const field of Object.keys(body)) {
-    if (!allowed.has(field)) errors[field] = 'This field cannot be updated.';
+    if (!allowed.has(field)
+      && !(partial && readOnlyInvoiceFields.includes(field))) {
+      errors[field] = 'This field cannot be updated.';
+    }
   }
 
   if (Object.hasOwn(body, 'clientId')) {

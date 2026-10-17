@@ -30,17 +30,34 @@ test('invalid fields and attempts to update protected fields return field errors
     email: 'not-an-email',
     defaultCurrency: 'XYZ',
     nextQuotationNumber: 0,
-    logoPath: '/uploads/forged.png',
+    unexpected: '/uploads/forged.png',
   });
 
   assert.deepEqual(updates, {});
   assert.deepEqual(Object.keys(errors).sort(), [
     'defaultCurrency',
     'email',
-    'logoPath',
     'nextQuotationNumber',
     'phone',
+    'unexpected',
   ]);
+});
+
+test('company update ignores server-managed fields in a full company response', () => {
+  const { updates, errors } = validateCompanyUpdate({
+    _id: '0123456789abcdef01234567',
+    id: '0123456789abcdef01234567',
+    __v: 0,
+    createdAt: '2026-10-14T06:08:05.963Z',
+    updatedAt: '2026-10-14T06:08:06.021Z',
+    logoPath: '/uploads/company/logo.png',
+    signaturePath: '/uploads/company/signature.png',
+    logoUrl: '/uploads/company/logo.png',
+    signatureUrl: '/uploads/company/signature.png',
+    name: 'Updated company',
+  });
+  assert.deepEqual(updates, { name: 'Updated company' });
+  assert.deepEqual(errors, {});
 });
 
 test('company defaults projection includes the documented form defaults', () => {

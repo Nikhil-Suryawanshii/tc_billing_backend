@@ -52,8 +52,13 @@ function validateCategoryInput(body, { partial = false } = {}) {
   }
 
   if (Object.hasOwn(body, 'isActive')) {
-    if (typeof body.isActive !== 'boolean') errors.isActive = 'Must be a boolean.';
-    else updates.isActive = body.isActive;
+    if (typeof body.isActive === 'boolean') {
+      updates.isActive = body.isActive;
+    } else if (body.isActive === 'true' || body.isActive === 'false') {
+      updates.isActive = body.isActive === 'true';
+    } else {
+      errors.isActive = 'Must be a boolean.';
+    }
   }
 
   if (Object.hasOwn(body, 'sortOrder')) {

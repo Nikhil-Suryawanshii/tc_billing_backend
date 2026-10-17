@@ -72,6 +72,30 @@ test('quotation input rejects client-supplied totals, numbers, and Converted sta
   assert.deepEqual(Object.keys(result.errors).sort(), ['grandTotal', 'number', 'status']);
 });
 
+test('quotation update ignores immutable document metadata and recalculates item totals', () => {
+  const result = validateQuotationInput({
+    _id: '0123456789abcdef01234567',
+    id: '0123456789abcdef01234567',
+    companyId: '0123456789abcdef01234567',
+    number: 'QUO 372',
+    status: 'Draft',
+    subtotal: '100.00',
+    grandTotal: '118.00',
+    items: [{
+      name: 'Cabinet',
+      quantity: '1',
+      unitPrice: '100.00',
+      taxRate: '18',
+      lineSubtotal: '100.00',
+      lineTotal: '118.00',
+    }],
+  }, { partial: true });
+  assert.deepEqual(result.errors, {});
+  assert.equal(result.updates.status, undefined);
+  assert.equal(result.updates.items[0].lineTotal, undefined);
+  assert.equal(result.updates.items[0].unitPrice, '100.00');
+});
+
 test('quotation filter parser validates ranges and exposes supported sort modes', () => {
   const valid = parseQuotationFilters({
     search: 'QUO',

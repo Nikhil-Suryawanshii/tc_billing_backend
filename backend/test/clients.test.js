@@ -26,6 +26,23 @@ test('client update accepts partial fields but rejects an empty or missing name'
   assert.equal(validateClientInput({}, { partial: true }).updates.name, undefined);
 });
 
+test('client update ignores metadata returned with a full client record', () => {
+  const result = validateClientInput({
+    _id: '0123456789abcdef01234567',
+    id: '0123456789abcdef01234567',
+    companyId: 'ignored',
+    createdAt: '2026-10-14T06:08:05.963Z',
+    updatedAt: '2026-10-14T06:08:06.021Z',
+    __v: 0,
+    name: 'Updated client',
+    email: '',
+  }, { partial: true });
+  assert.deepEqual(result, {
+    updates: { name: 'Updated client', email: '' },
+    errors: {},
+  });
+});
+
 test('invalid client fields and types produce field errors without passing invalid updates', () => {
   const { updates, errors } = validateClientInput({
     name: 'Valid name',

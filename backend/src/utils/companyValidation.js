@@ -25,6 +25,10 @@ const textFields = [
 ];
 
 const numberFields = ['defaultValidityDays', 'nextQuotationNumber', 'nextInvoiceNumber'];
+const readOnlyCompanyFields = [
+  'id', '_id', '__v', 'createdAt', 'updatedAt',
+  'logoPath', 'signaturePath', 'logoUrl', 'signatureUrl',
+];
 
 const defaultsFields = [
   'defaultHeader',
@@ -49,7 +53,7 @@ function validateCompanyUpdate(body) {
 
   const allowedFields = new Set([...textFields, ...numberFields, 'defaultCurrency']);
   for (const field of Object.keys(body)) {
-    if (!allowedFields.has(field)) {
+    if (!allowedFields.has(field) && !readOnlyCompanyFields.includes(field)) {
       errors[field] = 'This field cannot be updated.';
     }
   }
