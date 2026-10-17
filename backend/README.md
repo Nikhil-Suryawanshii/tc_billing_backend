@@ -53,13 +53,45 @@ npm run seed
 The seed is safe to rerun: it reuses the earliest company and upserts the seven
 default categories for it. `Company.current()` returns the earliest company.
 
+## Company settings API
+
+All company API responses use `{ "data": ..., "message": ... }`. Available routes:
+
+- `GET /api/v1/company` returns company settings plus `logoUrl` and `signatureUrl`.
+- `PUT /api/v1/company` updates editable profile, defaults, prefixes, and next numbers.
+  Invalid values return HTTP 422 with an `errors` object.
+- `GET /api/v1/company/defaults` returns only the values used to prefill forms.
+- `POST /api/v1/company/logo` and `/api/v1/company/signature` accept multipart
+  form data under the `file` field. JPEG, PNG, and WebP images up to 4 MB are
+  accepted; a replacement removes the previous local image.
+
+Company settings require a seeded company. Run `npm run seed` before using these
+routes. Image uploads use local `uploads/company/` storage for development and
+are intentionally unavailable on Vercel until persistent object storage is
+implemented.
+
+## Clients API
+
+- `GET /api/v1/clients?search=...&page=1&perPage=20` searches by name, phone,
+  or email. Results are scoped to the seeded company and include pagination
+  metadata; `perPage` is capped at 100.
+- `POST /api/v1/clients` creates a client. `name` is required and any submitted
+  `companyId` is ignored.
+- `GET`, `PUT`, and `DELETE /api/v1/clients/:id` show, update, and delete a
+  client. Deletion returns HTTP 422 while any quotation or invoice references it.
+- `GET /api/v1/clients/:id/history` returns the client's quotations, invoices,
+  and associated payments.
+
+Unknown or malformed client IDs return HTTP 404. Validation errors use HTTP 422
+and include field-level details in `errors`.
+
 ## Vercel
 
 Create a Vercel project with this directory as its Root Directory and select the
 Express framework. Set Node.js to 22.x and configure `MONGODB_URI`,
-`MONGODB_DATABASE`, and `CLIENT_ORIGIN` in the Vercel project's environment
-variables. The deployed root page checks Atlas connectivity; `/api/v1/health`
-checks that the API is running.
+and `MONGODB_DATABASE` in the Vercel project's environment variables.
+`CLIENT_ORIGIN` can be added when the frontend is deployed. The deployed root
+page checks Atlas connectivity; `/api/v1/health` checks that the API is running.
 
 Vercel's filesystem is not persistent. Do not store uploaded files in `uploads/`
 for production; move persistent uploads to object storage before adding upload

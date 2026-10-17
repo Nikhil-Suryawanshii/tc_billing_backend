@@ -26,4 +26,21 @@ app.get('/', async (req, res) => {
 
 app.use('/api/v1', apiRoutes);
 
+app.use('/api/v1', (req, res) => res.status(404).json({
+  data: null,
+  message: 'API route not found.',
+}));
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) {
+    return next(error);
+  }
+  console.error('Unhandled API error:', error);
+  const status = Number.isInteger(error.status) ? error.status : 500;
+  return res.status(status).json({
+    data: null,
+    message: status >= 500 ? 'An unexpected server error occurred.' : error.message,
+  });
+});
+
 module.exports = app;
