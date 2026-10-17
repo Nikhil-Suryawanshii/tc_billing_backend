@@ -1,6 +1,6 @@
 # Deploy THE CONCEPT DESIGNERS on Vercel
 
-This guide deploys the React app and Express API as **two Vercel projects** from this repository. MongoDB Atlas remains the database.
+This guide deploys the Express API and, once it exists, the React app as **two Vercel projects** from this repository. MongoDB Atlas remains the database. The backend is currently at setup step 01: database models, seed scripts, frontend, uploads, and PDF features have not been implemented yet.
 
 The `backend/` and `frontend/` folders are siblings. Create two Vercel projects from the same Git repository: set the backend project's Root Directory to `backend` and the frontend project's Root Directory to `frontend`. Do not deploy this repository root as either app.
 
@@ -10,11 +10,11 @@ Browser → React app on Vercel → Express API on Vercel → MongoDB Atlas
                                  Vercel Blob
 ```
 
-## Important: prepare the app before deploying
+## Before adding uploads and PDF features
 
-The current local setup writes images and PDFs under `backend/uploads/`. Vercel Functions have a read-only filesystem except for temporary `/tmp` storage, and Express `express.static()` does not serve files on Vercel. Files written to a function's temporary storage are not persistent. Do not deploy the current disk-based upload/PDF storage and expect files to remain available.
+The current step-01 backend has no upload or PDF endpoints, so this does not block deploying its API and health checks. Before implementing those features, account for Vercel Functions' read-only filesystem (except temporary `/tmp` storage) and do not expect files written to a function's temporary storage to persist.
 
-Before deploying, make these changes:
+Before implementing those features for Vercel, account for:
 
 1. **Move persistent files to object storage.** Use Vercel Blob (or another persistent object store) for company logos, signatures, product images, and generated PDFs. Store the Blob URL or pathname in MongoDB. Use temporary `/tmp` only while generating a PDF, then upload it to Blob. Replace the local-file deletion and `/uploads` serving paths with Blob operations.
 2. **Choose Blob access deliberately.** Product images and logos can use a public Blob store. Use a separate private Blob store for quotations and invoices, and stream/download those through the API. Private Blob files require server-side access; public Blob files can be opened by anyone who has the URL.
@@ -24,7 +24,7 @@ Before deploying, make these changes:
 6. **Check upload payload limits.** The current image upload limit is 5 MB, while Vercel Function request and response bodies are limited to 4.5 MB. Lower the server upload limit or change to direct-to-Blob client uploads.
 7. **Keep the API private if it will contain real client data.** This app currently has no login and its `/api/v1` routes are open. A public Vercel URL therefore exposes the API to anyone who can reach it. Add authentication or configure access protection before storing real client or financial records.
 
-These are application changes, separate from Vercel dashboard configuration. Vercel's Express deployment does not make the local upload folder persistent.
+These are future application changes, separate from Vercel dashboard configuration. Vercel's Express deployment does not make a local upload folder persistent.
 
 ## 1. Prepare MongoDB Atlas
 
@@ -34,9 +34,9 @@ These are application changes, separate from Vercel dashboard configuration. Ver
 
 Do not add the local development machine's IP as the only Atlas entry; that only permits local connections.
 
-## 2. Seed the production database once
+## 2. Seed the production database once (after backend step 02)
 
-From a trusted local terminal, with the production Atlas URI available in `backend/.env`, run:
+The seed script is added in backend step 02. Do not run this step until that implementation exists. When available, from a trusted local terminal, with the production Atlas URI available in `backend/.env`, run:
 
 ```bash
 cd backend
@@ -44,7 +44,7 @@ npm install
 npm run seed
 ```
 
-The seed script creates the company, categories, and sample quotation data. Run it deliberately against the production database. Do not run `npm run seed` as part of Vercel's build command.
+The seed script will create the company and categories specified in `md/backend/02-database.md`. Run it deliberately against the production database. Do not run `npm run seed` as part of Vercel's build command.
 
 ## 3. Push the project to Git
 
@@ -62,9 +62,8 @@ Vercel's Git integration deploys each project from the same repository. Push the
    | `MONGODB_URI` | Production Atlas connection URI |
    | `MONGODB_DATABASE` | `the_concept_interior` |
    | `CLIENT_ORIGIN` | The frontend's production origin, e.g. `https://tc-interior.vercel.app` |
-   | `BLOB_READ_WRITE_TOKEN` | Add/connect the Blob store token(s) used by the storage implementation |
 
-   `PORT` is not needed on Vercel. Add environment variables to Preview only if you intentionally want preview builds to connect to a separate test database and storage.
+   Since the frontend has not been built yet, `CLIENT_ORIGIN` can be omitted for the initial backend-only deployment; it defaults to `http://localhost:5173`. Set it to the frontend's exact production origin once that app is deployed. `PORT` and `BLOB_READ_WRITE_TOKEN` are not needed for the current setup. Add a Blob token only after persistent Blob storage is implemented. Add environment variables to Preview only if you intentionally want preview builds to connect to a separate test database and storage.
 5. Deploy the backend project. Copy its production URL, for example `https://tc-interior-api.vercel.app`.
 6. Open `https://<backend-domain>/`. The backend status page should show **Connected successfully** when MongoDB is reachable. `/api/v1/health` checks the API process separately. If the status page reports a database failure, inspect the backend deployment's runtime logs and check the Atlas access list and environment variable names.
 

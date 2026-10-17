@@ -37,6 +37,22 @@ check at `http://localhost:5000/api/v1/health` returns:
 If port 5000 is already in use, set `PORT=5001` in `.env` and use port 5001 for
 the URLs above. The server reports a clear error if the configured port is occupied.
 
+## Database models and seed
+
+The Mongoose models are in `src/models/`. Quotation and invoice line items are
+embedded documents; money fields are stored as strings with two decimal places.
+Use the helpers in `src/utils/money.js` for exact decimal arithmetic.
+
+After `MONGODB_URI` is configured and Atlas access is allowed, initialize the
+company and categories with:
+
+```bash
+npm run seed
+```
+
+The seed is safe to rerun: it reuses the earliest company and upserts the seven
+default categories for it. `Company.current()` returns the earliest company.
+
 ## Vercel
 
 Create a Vercel project with this directory as its Root Directory and select the
