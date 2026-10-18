@@ -1,15 +1,20 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import PDFDocument from 'pdfkit';
 import { d, money } from '../lib/money.js';
 import { rootDir } from '../config/paths.js';
 
+// Resolve font paths relative to THIS file — never depends on process.cwd().
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FONT_DIR = path.resolve(__dirname, '../../node_modules/dejavu-fonts-ttf/ttf');
+
 const LEFT = 40;
 const PAGE_BOTTOM = 112;
-const FONT_DIR = path.join(rootDir, 'node_modules', 'dejavu-fonts-ttf', 'ttf');
+// DejaVu Sans ships with the ₹ glyph (U+20B9) and is available on all platforms.
 const REGULAR_FONT = path.join(FONT_DIR, 'DejaVuSans.ttf');
 const BOLD_FONT = path.join(FONT_DIR, 'DejaVuSans-Bold.ttf');
-const RUPEE_FONT = path.join(rootDir, 'assets', 'fonts', 'NotoSansDevanagari.ttf');
+const RUPEE_FONT = REGULAR_FONT; // DejaVu Sans already contains ₹
 const LETTERHEAD_LOGO = path.join(rootDir, 'assets', 'tc-logo.png');
 
 export function writePdf({ filePath, kind, record, company }) {
@@ -19,27 +24,29 @@ export function writePdf({ filePath, kind, record, company }) {
       margins: { top: 40, left: 40, right: 40, bottom: PAGE_BOTTOM },
       bufferPages: true,
     });
-    if (fs.existsSync(REGULAR_FONT)) doc.registerFont('Body', REGULAR_FONT);
-    if (fs.existsSync(BOLD_FONT)) doc.registerFont('BodyBold', BOLD_FONT);
-    if (fs.existsSync(RUPEE_FONT)) doc.registerFont('Rupee', RUPEE_FONT);
+    // Track which fonts were successfully registered (don't rely on PDFKit internals).
+    const registeredFonts = new Set();
+    if (fs.existsSync(REGULAR_FONT)) { doc.registerFont('Body', REGULAR_FONT); registeredFonts.add('Body'); }
+    if (fs.existsSync(BOLD_FONT)) { doc.registerFont('BodyBold', BOLD_FONT); registeredFonts.add('BodyBold'); }
+    if (fs.existsSync(RUPEE_FONT)) { doc.registerFont('Rupee', RUPEE_FONT); registeredFonts.add('Rupee'); }
     const stream = fs.createWriteStream(filePath);
     doc.pipe(stream);
-    drawDocument(doc, kind, record, company);
-    addFooters(doc, kind, company, record);
+    drawDocument(doc, kind, record, company, registeredFonts);
+    addFooters(doc, kind, company, record, registeredFonts);
     doc.end();
     stream.on('finish', () => resolve(filePath));
     stream.on('error', reject);
   });
 }
 
-function addFooters(doc, kind, liveCompany, record) {
+function addFooters(doc, kind, liveCompany, record, registeredFonts) {
   const range = doc.bufferedPageRange();
   const company = letterheadCompany(record, liveCompany);
   const label = kind === 'invoice' ? 'Invoice' : 'Quotation';
   for (let index = 0; index < range.count; index += 1) {
     doc.switchToPage(index);
     drawLetterheadBand(doc);
-    drawFooterDetails(doc, company, `${label}  ·  Page ${index + 1} of ${range.count}`);
+    drawFooterDetails(doc, company, `${label}  ·  Page ${index + 1} of ${range.count}`, registeredFonts);
   }
 }
 
@@ -96,7 +103,7 @@ function footerAddress(company) {
   return parts.join(', ');
 }
 
-function drawFooterDetails(doc, company, pageLabel) {
+function drawFooterDetails(doc, company, pageLabel, registeredFonts) {
   const contact = [
     company.phone ? `Mobile: ${company.phone}` : '',
     company.email ? `Email: ${company.email}` : '',
@@ -109,11 +116,11 @@ function drawFooterDetails(doc, company, pageLabel) {
     company.bankUpi ? `UPI: ${company.bankUpi}` : '',
   ].filter(Boolean);
 
-  doc.font(bodyFont(doc)).fontSize(7.5).fillColor('#ffffff');
+  doc.font(bodyFont(registeredFonts)).fontSize(7.5).fillColor('#ffffff');
   const leftLines = [company.name, footerAddress(company), contact, extra].filter(Boolean);
   paintLines(doc, leftLines, 18, fromBottom(doc, 40), 280);
   if (bank.length) paintLines(doc, bank, 318, fromBottom(doc, 40), 260);
-  doc.font(bodyFont(doc)).fontSize(7).fillColor('#111111');
+  doc.font(bodyFont(registeredFonts)).fontSize(7).fillColor('#111111');
   doc._fragment(pageLabel, doc.page.width - 18 - doc.widthOfString(pageLabel), fromBottom(doc, 100), {});
 }
 
@@ -144,7 +151,7 @@ function wrapLine(doc, text, width) {
   return lines;
 }
 
-function drawDocument(doc, kind, record, liveCompany) {
+function drawDocument(doc, kind, record, liveCompany, registeredFonts) {
   const company = letterheadCompany(record, liveCompany);
   const client = record.clientSnapshot || {};
   const title = record.header || (kind === 'invoice' ? 'Invoice' : 'Quotation');
@@ -205,7 +212,7 @@ function drawDocument(doc, kind, record, liveCompany) {
   const factBoxWidth = width - clientBoxWidth - 15;
   drawClientBox(doc, client, LEFT, y, clientBoxWidth, factsHeight);
   facts.forEach((fact, index) => {
-    drawFactBox(doc, fact, factBoxX, y + index * (factBoxHeight + factGap), factBoxWidth, factBoxHeight);
+    drawFactBox(doc, fact, factBoxX, y + index * (factBoxHeight + factGap), factBoxWidth, factBoxHeight, registeredFonts);
   });
   y += factsHeight + 14;
   drawRule(doc, y);
@@ -223,11 +230,11 @@ function drawDocument(doc, kind, record, liveCompany) {
     y = doc.y + 10;
   }
 
-  y = drawTable(doc, record, y);
-  y = drawTotals(doc, kind, record, y);
+  y = drawTable(doc, record, y, registeredFonts);
+  y = drawTotals(doc, kind, record, y, registeredFonts);
 
   y = ensureSpace(doc, y, 90);
-  doc.font(bodyFont(doc)).fontSize(11).fillColor('#222222');
+  doc.font(bodyFont(registeredFonts)).fontSize(11).fillColor('#222222');
   if (record.terms) {
     doc.text(record.terms, LEFT, y, { width });
     y = doc.y + 6;
@@ -265,7 +272,7 @@ function drawClientBox(doc, client, x, y, width, height) {
   });
 }
 
-function drawFactBox(doc, fact, x, y, width, height) {
+function drawFactBox(doc, fact, x, y, width, height, registeredFonts) {
   const color = fact.highlight ? '#168cae' : '#111827';
   doc.save();
   doc.roundedRect(x, y, width, height, 11).fillAndStroke('#f5f6f8', '#aeb5c0');
@@ -277,13 +284,11 @@ function drawFactBox(doc, fact, x, y, width, height) {
   if (fact.highlight && fact.value.includes('₹')) {
     const amount = fact.value.replace(/^₹\s*/, '');
     const right = x + width - 8;
-    doc.font('Helvetica-Bold').fontSize(valueSize).fillColor(color);
+    doc.font(boldFont(registeredFonts)).fontSize(valueSize).fillColor(color);
     const amountWidth = doc.widthOfString(amount);
     doc.text(amount, right - amountWidth, valueY, { lineBreak: false });
-    doc.font(rupeeFont(doc)).fontSize(valueSize).fillColor(color);
+    doc.font(rupeeFont(registeredFonts)).fontSize(valueSize).fillColor(color);
     const symbolWidth = doc.widthOfString('₹');
-    // SFNS and Helvetica use different ascender metrics. Raise the rupee glyph
-    // slightly so it visually shares the bold amount's baseline in the PDF.
     doc.text('₹', right - amountWidth - symbolWidth - 3, valueY - 2, { lineBreak: false });
     return;
   }
@@ -297,18 +302,18 @@ function drawRule(doc, y) {
   doc.restore();
 }
 
-function drawTable(doc, record, startY) {
+function drawTable(doc, record, startY, registeredFonts) {
   const columns = tableColumns();
   let y = ensureSpace(doc, startY, 36);
-  y = headerRow(doc, columns, y);
+  y = headerRow(doc, columns, y, registeredFonts);
 
   let serial = 0;
   groupItems(record.items).forEach((group) => {
     if (group.heading) {
       y = ensureSpace(doc, y, 22);
-      if (y === 48) y = headerRow(doc, columns, y);
+      if (y === 48) y = headerRow(doc, columns, y, registeredFonts);
       doc.rect(LEFT, y, tableWidth(columns), 18).fill('#f3f1ee');
-      doc.fillColor('#111111').font(boldFont(doc)).fontSize(9).text(`**** ${group.heading}`, LEFT + 4, y + 4, {
+      doc.fillColor('#111111').font(boldFont(registeredFonts)).fontSize(9).text(`**** ${group.heading}`, LEFT + 4, y + 4, {
         width: tableWidth(columns) - 8,
       });
       y += 18;
@@ -316,12 +321,12 @@ function drawTable(doc, record, startY) {
     group.items.forEach((item) => {
       serial += 1;
       const detail = item.name || itemDetails(item);
-      doc.font(bodyFont(doc)).fontSize(9);
+      doc.font(bodyFont(registeredFonts)).fontSize(9);
       const detailHeight = doc.heightOfString(detail, { width: columns[1].width - 8 });
       const rowHeight = Math.max(22, detailHeight + 10);
       if (y + rowHeight > doc.page.height - PAGE_BOTTOM) {
         doc.addPage();
-        y = headerRow(doc, columns, 48);
+        y = headerRow(doc, columns, 48, registeredFonts);
       }
       doc.rect(LEFT, y, tableWidth(columns), rowHeight).strokeColor('#d0d0d0').stroke();
       const values = [
@@ -333,7 +338,7 @@ function drawTable(doc, record, startY) {
       ];
       let x = LEFT;
       values.forEach((value, columnIndex) => {
-        doc.font(value.includes('₹') ? rupeeFont(doc) : bodyFont(doc)).fontSize(9).fillColor('#111111').text(value, x + 4, y + 5, {
+        doc.font(value.includes('₹') ? rupeeFont(registeredFonts) : bodyFont(registeredFonts)).fontSize(9).fillColor('#111111').text(value, x + 4, y + 5, {
           width: columns[columnIndex].width - 8,
           align: columns[columnIndex].align,
         });
@@ -357,7 +362,7 @@ function groupItems(items = []) {
   return groups;
 }
 
-function drawTotals(doc, kind, record, startY) {
+function drawTotals(doc, kind, record, startY, registeredFonts) {
   const rows = [['Subtotal', rupee(record.subtotal)]];
   if (d(record.discountTotal).gt(0)) rows.push(['Discount', rupee(record.discountTotal)]);
   if (d(record.taxTotal).gt(0)) {
@@ -401,11 +406,11 @@ function drawTotals(doc, kind, record, startY) {
       cursor += 5;
     }
     const color = major ? '#168cae' : '#111827';
-    doc.font(major ? 'Helvetica-Bold' : 'Times-Roman')
+    doc.font(major ? boldFont(registeredFonts) : 'Times-Roman')
       .fontSize(major ? 12 : 10).fillColor(major && label === 'Total' ? '#111827' : color)
       .text(label, panelX + panelPadding, cursor, { width: 128, lineBreak: false });
     const valueX = panelX + 138;
-    doc.font(value.includes('₹') ? rupeeFont(doc) : (major ? 'Helvetica-Bold' : 'Times-Roman'))
+    doc.font(value.includes('₹') ? rupeeFont(registeredFonts) : (major ? boldFont(registeredFonts) : 'Times-Roman'))
       .fontSize(major ? 12 : 10).fillColor(color)
       .text(value, valueX, cursor, { width: panelWidth - (valueX - panelX) - panelPadding, align: 'right', lineBreak: false });
     cursor += rowHeights[index];
@@ -440,12 +445,12 @@ function drawSignatureBlock(doc, company, record, startY) {
     .text('Authorised Signatory', x + 8, doc.y + 1, { width: blockWidth - 8, align: 'right' });
 }
 
-function headerRow(doc, columns, y) {
+function headerRow(doc, columns, y, registeredFonts) {
   const width = tableWidth(columns);
   doc.rect(LEFT, y, width, 18).fill('#1f1f1f');
   let x = LEFT;
   columns.forEach((column) => {
-    doc.fillColor('#ffffff').font(boldFont(doc)).fontSize(8).text(column.label, x + 4, y + 5, {
+    doc.fillColor('#ffffff').font(boldFont(registeredFonts)).fontSize(8).text(column.label, x + 4, y + 5, {
       width: column.width - 8,
       align: column.align,
     });
@@ -487,20 +492,20 @@ function centerX(doc, text) {
   return (doc.page.width - doc.widthOfString(text)) / 2;
 }
 
-function bodyFont(doc) {
-  return doc._registeredFonts?.Body ? 'Body' : 'Helvetica';
+function bodyFont(registeredFonts) {
+  return registeredFonts.has('Body') ? 'Body' : 'Helvetica';
 }
 
-function boldFont(doc) {
-  return doc._registeredFonts?.BodyBold ? 'BodyBold' : 'Helvetica-Bold';
+function boldFont(registeredFonts) {
+  return registeredFonts.has('BodyBold') ? 'BodyBold' : 'Helvetica-Bold';
 }
 
 function rupee(value) {
   return `₹ ${money(value)}`;
 }
 
-function rupeeFont(doc) {
-  return doc._registeredFonts?.Rupee ? 'Rupee' : bodyFont(doc);
+function rupeeFont(registeredFonts) {
+  return registeredFonts.has('Rupee') ? 'Rupee' : bodyFont(registeredFonts);
 }
 
 function formatDay(value) {
