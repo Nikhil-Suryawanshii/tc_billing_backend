@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import multer from 'multer';
 import path from 'path';
 import { uploadsDir } from '../config/paths.js';
@@ -5,7 +6,11 @@ import { uploadsDir } from '../config/paths.js';
 export function imageUpload(folder) {
   return multer({
     storage: multer.diskStorage({
-      destination: path.join(uploadsDir, folder),
+      destination: (_req, _file, cb) => {
+        const dir = path.join(uploadsDir, folder);
+        fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      },
       filename: (_req, file, cb) => {
         const safe = file.originalname.replace(/[^a-zA-Z0-9.\-]/g, '') || 'image';
         cb(null, `${Date.now()}-${safe}`);

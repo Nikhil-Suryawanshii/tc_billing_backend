@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'path';
 import Quotation from '../models/Quotation.js';
 import Invoice from '../models/Invoice.js';
@@ -18,7 +19,9 @@ export async function generatePdf(kind, id) {
   const previous = await DocumentFile.findOne({ documentType: kind, documentId: record._id }).sort({ version: -1 });
   const version = (previous?.version || 0) + 1;
   const filename = `${String(record.number).replace(/\s+/g, '-')}-v${version}.pdf`;
-  const absolute = path.join(uploadsDir, 'pdfs', filename);
+  const pdfsDir = path.join(uploadsDir, 'pdfs');
+  fs.mkdirSync(pdfsDir, { recursive: true });
+  const absolute = path.join(pdfsDir, filename);
   await writePdf({ filePath: absolute, kind, record, company });
 
   const publicPath = `/uploads/pdfs/${filename}`;

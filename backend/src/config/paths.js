@@ -7,4 +7,8 @@ export const rootDir = fs.existsSync(path.join(nestedBackendDir, 'package.json')
   ? nestedBackendDir
   : workingDir;
 
-export const uploadsDir = path.join(rootDir, 'uploads');
+// Vercel serverless has a read-only filesystem except for /tmp.
+// Use /tmp for all file writes when running on Vercel.
+export const uploadsDir = process.env.VERCEL
+  ? '/tmp/uploads'
+  : path.join(rootDir, 'uploads');
