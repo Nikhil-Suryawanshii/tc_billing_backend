@@ -15,7 +15,7 @@ const PAGE_BOTTOM = 112;
 const REGULAR_FONT = path.join(FONT_DIR, 'DejaVuSans.ttf');
 const BOLD_FONT = path.join(FONT_DIR, 'DejaVuSans-Bold.ttf');
 const RUPEE_FONT = REGULAR_FONT; // DejaVu Sans already contains ₹
-const LETTERHEAD_LOGO = path.resolve(__dirname, '../../assets/tc-logo.png');
+const LETTERHEAD_LOGO = path.resolve(__dirname, '../../assets/fonts/tc-logo.png');
 
 export function writePdf({ filePath, kind, record, company }) {
   return new Promise((resolve, reject) => {
