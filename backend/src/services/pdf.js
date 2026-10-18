@@ -6,9 +6,10 @@ import { rootDir } from '../config/paths.js';
 
 const LEFT = 40;
 const PAGE_BOTTOM = 112;
-const REGULAR_FONT = '/System/Library/Fonts/Supplemental/Arial Unicode.ttf';
-const BOLD_FONT = '/System/Library/Fonts/Supplemental/Arial Bold.ttf';
-const RUPEE_FONT = '/System/Library/Fonts/SFNS.ttf';
+const FONT_DIR = path.join(rootDir, 'node_modules', 'dejavu-fonts-ttf', 'ttf');
+const REGULAR_FONT = path.join(FONT_DIR, 'DejaVuSans.ttf');
+const BOLD_FONT = path.join(FONT_DIR, 'DejaVuSans-Bold.ttf');
+const RUPEE_FONT = REGULAR_FONT;
 const LETTERHEAD_LOGO = path.join(rootDir, 'assets', 'tc-logo.png');
 
 export function writePdf({ filePath, kind, record, company }) {
@@ -18,10 +19,8 @@ export function writePdf({ filePath, kind, record, company }) {
       margins: { top: 40, left: 40, right: 40, bottom: PAGE_BOTTOM },
       bufferPages: true,
     });
-    if (fs.existsSync(REGULAR_FONT)) {
-      doc.registerFont('Body', REGULAR_FONT);
-      doc.registerFont('BodyBold', REGULAR_FONT);
-    }
+    if (fs.existsSync(REGULAR_FONT)) doc.registerFont('Body', REGULAR_FONT);
+    if (fs.existsSync(BOLD_FONT)) doc.registerFont('BodyBold', BOLD_FONT);
     if (fs.existsSync(RUPEE_FONT)) doc.registerFont('Rupee', RUPEE_FONT);
     const stream = fs.createWriteStream(filePath);
     doc.pipe(stream);
