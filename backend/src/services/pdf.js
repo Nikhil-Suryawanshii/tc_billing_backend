@@ -295,7 +295,7 @@ function drawFactBox(doc, fact, x, y, width, height, registeredFonts) {
     doc.text(amount, right - amountWidth, valueY, { lineBreak: false });
     doc.font(rupeeFont(registeredFonts)).fontSize(valueSize).fillColor(color);
     const symbolWidth = doc.widthOfString('₹');
-    doc.text('₹', right - amountWidth - symbolWidth - 3, valueY - 2, { lineBreak: false });
+    doc.text('₹', right - amountWidth - symbolWidth - 3, valueY, { lineBreak: false });
     return;
   }
   doc.font('Times-Bold').fontSize(valueSize).fillColor(color)
