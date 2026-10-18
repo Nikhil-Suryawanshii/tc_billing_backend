@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import PDFDocument from 'pdfkit';
 import { d, money } from '../lib/money.js';
-import { rootDir } from '../config/paths.js';
+import { rootDir, uploadsDir } from '../config/paths.js';
 
 // Resolve font paths relative to THIS file — never depends on process.cwd().
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -156,7 +156,12 @@ function drawDocument(doc, kind, record, liveCompany, registeredFonts) {
   const client = record.clientSnapshot || {};
   const title = record.header || (kind === 'invoice' ? 'Invoice' : 'Quotation');
   const width = doc.page.width - 80;
-  const uploadedLogo = company.logoPath ? path.join(rootDir, String(company.logoPath).replace(/^\/+/, '')) : '';
+  const logoPublicPath = String(company.logoPath || '');
+  const uploadedLogo = logoPublicPath.startsWith('/uploads/')
+    ? path.join(uploadsDir, logoPublicPath.slice('/uploads/'.length))
+    : logoPublicPath
+      ? path.join(rootDir, logoPublicPath.replace(/^\/+/, ''))
+      : '';
   const logoPath = uploadedLogo && fs.existsSync(uploadedLogo) ? uploadedLogo : LETTERHEAD_LOGO;
   const logoY = 42;
   const logoSize = 118;
