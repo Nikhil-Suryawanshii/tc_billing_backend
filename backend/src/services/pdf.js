@@ -9,7 +9,7 @@ const PAGE_BOTTOM = 112;
 const FONT_DIR = path.join(rootDir, 'node_modules', 'dejavu-fonts-ttf', 'ttf');
 const REGULAR_FONT = path.join(FONT_DIR, 'DejaVuSans.ttf');
 const BOLD_FONT = path.join(FONT_DIR, 'DejaVuSans-Bold.ttf');
-const RUPEE_FONT = REGULAR_FONT;
+const RUPEE_FONT = path.join(rootDir, 'assets', 'fonts', 'NotoSansDevanagari.ttf');
 const LETTERHEAD_LOGO = path.join(rootDir, 'assets', 'tc-logo.png');
 
 export function writePdf({ filePath, kind, record, company }) {
