@@ -128,7 +128,8 @@ router.post('/quotations', asyncHandler(async (req, res) => {
 router.get('/quotations/:id/pdf', asyncHandler(async (req, res) => {
   const file = await generatePdf('quotation', req.params.id);
   res.type('application/pdf');
-  res.download(file.absolute, file.filename);
+  res.setHeader('Content-Disposition', 'inline');
+  res.sendFile(file.absolute);
 }));
 router.post('/quotations/:id/duplicate', asyncHandler(async (req, res) => {
   ok(res, await quotations.duplicateQuotation(req.params.id), 'Quotation duplicated');
@@ -159,7 +160,8 @@ router.post('/invoices', asyncHandler(async (req, res) => {
 router.get('/invoices/:id/pdf', asyncHandler(async (req, res) => {
   const file = await generatePdf('invoice', req.params.id);
   res.type('application/pdf');
-  res.download(file.absolute, file.filename);
+  res.setHeader('Content-Disposition', 'inline');
+  res.sendFile(file.absolute);
 }));
 router.get('/invoices/:id/payments', asyncHandler(async (req, res) => {
   ok(res, await payments.invoicePayments(req.params.id));
