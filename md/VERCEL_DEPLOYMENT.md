@@ -54,7 +54,7 @@ Vercel's Git integration deploys each project from the same repository. Push the
 
 1. In Vercel, choose **Add New → Project** and import this repository.
 2. Set **Root Directory** to `backend`.
-3. Use the Express framework detection. Set Node.js to `22.x` for this project.
+3. Use the Express framework detection. Set Node.js to `22.x` for this project. The backend root `index.js` exports the Express app as the Vercel function entry point.
 4. Add these **Production** environment variables in **Project Settings → Environment Variables**:
 
    | Name | Value |

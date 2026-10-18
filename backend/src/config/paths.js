@@ -1,7 +1,10 @@
+import fs from 'node:fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const srcDir = path.dirname(fileURLToPath(import.meta.url));
+const workingDir = process.cwd();
+const nestedBackendDir = path.join(workingDir, 'backend');
+export const rootDir = fs.existsSync(path.join(nestedBackendDir, 'package.json'))
+  ? nestedBackendDir
+  : workingDir;
 
-export const rootDir = path.resolve(srcDir, '../..');
 export const uploadsDir = path.join(rootDir, 'uploads');
