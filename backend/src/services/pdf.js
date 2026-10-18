@@ -15,7 +15,7 @@ const PAGE_BOTTOM = 112;
 const REGULAR_FONT = path.join(FONT_DIR, 'DejaVuSans.ttf');
 const BOLD_FONT = path.join(FONT_DIR, 'DejaVuSans-Bold.ttf');
 const RUPEE_FONT = REGULAR_FONT; // DejaVu Sans already contains ₹
-const LETTERHEAD_LOGO = path.join(rootDir, 'assets', 'tc-logo.png');
+const LETTERHEAD_LOGO = path.resolve(__dirname, '../../assets/tc-logo.png');
 
 export function writePdf({ filePath, kind, record, company }) {
   return new Promise((resolve, reject) => {
@@ -162,14 +162,15 @@ function drawDocument(doc, kind, record, liveCompany, registeredFonts) {
     : logoPublicPath
       ? path.join(rootDir, logoPublicPath.replace(/^\/+/, ''))
       : '';
-  const logoPath = uploadedLogo && fs.existsSync(uploadedLogo) ? uploadedLogo : LETTERHEAD_LOGO;
   const logoY = 42;
   const logoSize = 118;
-  if (logoPath && fs.existsSync(logoPath)) {
+  for (const logoPath of [uploadedLogo, LETTERHEAD_LOGO].filter(Boolean)) {
+    if (!fs.existsSync(logoPath)) continue;
     try {
       doc.image(logoPath, LEFT, logoY, { fit: [logoSize, logoSize] });
+      break;
     } catch {
-      // Keep the company text when the logo file cannot be drawn.
+      // Try the bundled letterhead logo when an uploaded logo cannot be drawn.
     }
   }
 
