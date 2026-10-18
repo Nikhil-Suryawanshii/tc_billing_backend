@@ -1,14 +1,27 @@
-const mongoose = require('mongoose');
-const { moneyField } = require('./helpers');
+import mongoose from 'mongoose';
 
-const paymentSchema = new mongoose.Schema({
-  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
-  invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', required: true },
-  amount: { ...moneyField(), required: true },
-  paymentDate: { type: Date, required: true },
-  method: { type: String, default: '' },
-  reference: { type: String, default: '' },
-  notes: { type: String, default: '' },
-}, { timestamps: true, collection: 'payments' });
+const paymentSchema = new mongoose.Schema(
+  {
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
+    invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', required: true, index: true },
+    amount: { type: String, required: true },
+    paymentDate: { type: Date, required: true, index: true },
+    method: { type: String, default: '' },
+    reference: { type: String, default: '' },
+    notes: { type: String, default: '' },
+  },
+  { timestamps: true }
+);
 
-module.exports = mongoose.models.Payment || mongoose.model('Payment', paymentSchema);
+paymentSchema.set('toJSON', {
+  virtuals: true,
+  versionKey: false,
+  transform(_doc, ret) {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    return ret;
+  },
+});
+
+const Payment = mongoose.model('Payment', paymentSchema);
+export default Payment;

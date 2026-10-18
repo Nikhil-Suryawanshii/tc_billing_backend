@@ -1,32 +1,25 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 let connectionPromise;
 
-async function connectDB() {
+export async function connectDb() {
   const uri = process.env.MONGODB_URI;
-  const database = process.env.MONGODB_DATABASE || 'the_concept_interior';
-
   if (!uri) {
-    throw new Error('MONGODB_URI is not set. Add your Atlas URI to backend/.env.');
+    throw new Error('Set MONGODB_URI in backend/.env to your MongoDB Atlas connection string.');
   }
 
-  if (mongoose.connection.readyState === 1) {
-    return mongoose.connection;
-  }
+  if (mongoose.connection.readyState === 1) return mongoose.connection;
 
+  mongoose.set('strictQuery', true);
   if (!connectionPromise) {
-    connectionPromise = mongoose.connect(uri, { dbName: database })
-      .then((connection) => {
-        console.log(`MongoDB connected to database "${database}".`);
-        return connection.connection;
-      })
-      .catch((error) => {
-        connectionPromise = undefined;
-        throw error;
-      });
+    connectionPromise = mongoose.connect(uri, {
+      dbName: process.env.MONGODB_DATABASE || 'the_concept_interior',
+      serverSelectionTimeoutMS: 10000,
+    }).catch((error) => {
+      connectionPromise = null;
+      throw error;
+    });
   }
-
-  return connectionPromise;
+  await connectionPromise;
+  return mongoose.connection;
 }
-
-module.exports = connectDB;

@@ -1,238 +1,189 @@
-const mongoose = require('mongoose');
-const { Client, Company, Product, Category, Quotation } = require('../models');
-const { calculateTotals } = require('./totals');
+import Quotation from '../models/Quotation.js';
+import Company from '../models/Company.js';
+import { HttpError, escapeRegex, pageQuery } from '../lib/http.js';
+import { d } from '../lib/money.js';
+import { addDays, endOfDay, parseDate } from '../lib/dates.js';
+import { priceDocument } from './totals.js';
+import { takeNumber, withTransaction } from './numbering.js';
+import { clientSnapshot, companySnapshot, messageFields, presentDocument, resolveClient } from './documents.js';
+import { refreshStatuses } from './status.js';
+import Client from '../models/Client.js';
 
-class QuotationError extends Error {
-  constructor(message, status, errors) {
-    super(message);
-    this.name = 'QuotationError';
-    this.status = status;
-    this.errors = errors;
-  }
-}
+const statusValues = ['Draft', 'Sent', 'Accepted', 'Rejected', 'Expired'];
 
-function snapshot(source, fields) {
-  return Object.fromEntries(fields.map((field) => [field, source[field] ?? '']));
-}
+function buildPayload(company, client, body) {
+  const priced = priceDocument(body.items, body.additionalCharges || 0);
+  const quotationDate = parseDate(body.quotationDate, 'quotationDate', true);
+  const validUntil = body.validUntil
+    ? parseDate(body.validUntil, 'validUntil')
+    : addDays(quotationDate, company.defaultValidityDays || 7);
+  const messages = messageFields(company, body, 'quotation');
 
-const companySnapshotFields = [
-  'name', 'logoPath', 'signaturePath', 'gstNumber', 'addressLine1', 'addressLine2',
-  'city', 'state', 'postalCode', 'country', 'phone', 'email', 'website', 'defaultCurrency',
-];
-const clientSnapshotFields = [
-  'name', 'gstNumber', 'phone', 'email', 'attentionName', 'billingAddress',
-  'shippingAddress', 'city', 'state', 'postalCode', 'country',
-];
-
-function defaultDocumentFields(company) {
-  const validityDays = company.defaultValidityDays;
-  const quotationDate = new Date();
-  const validUntil = new Date(quotationDate);
-  validUntil.setDate(validUntil.getDate() + validityDays);
   return {
+    clientId: client._id,
+    poSoNumber: body.poSoNumber || '',
+    header: body.header || company.defaultHeader || 'Quotation',
+    currency: body.currency || company.defaultCurrency || 'INR',
     quotationDate,
     validUntil,
-    header: company.defaultHeader,
-    currency: company.defaultCurrency,
-    salutation: company.defaultSalutation,
-    message: company.defaultMessage,
-    closing: company.defaultClosing,
-    signatory: company.defaultSignatory,
-    terms: company.quotationTerms,
-    validityText: `${validityDays} days`,
+    companySnapshot: companySnapshot(company),
+    clientSnapshot: clientSnapshot(client),
+    ...messages,
+    ...priced,
   };
 }
 
-async function resolveClient({ body, existingClientId, companyId, session }) {
-  if (body.clientId || (existingClientId && !body.name)) {
-    const clientId = body.clientId || existingClientId;
-    const client = await Client.findOne({ _id: clientId, companyId }).session(session);
-    if (!client) throw new QuotationError('Client not found for this company.', 422, { clientId: 'Client not found for this company.' });
-    return client;
+async function findOwned(id) {
+  const company = await Company.current();
+  await refreshStatuses(company._id);
+  const quotation = await Quotation.findOne({ _id: id, companyId: company._id });
+  if (!quotation) throw new HttpError(404, 'Quotation not found');
+  return { company, quotation };
+}
+
+export async function listQuotations(query) {
+  const company = await Company.current();
+  await refreshStatuses(company._id);
+  const { page, perPage, skip } = pageQuery(query);
+  const filter = { companyId: company._id, archivedAt: query.archived === '1' ? { $ne: null } : null };
+  if (query.status) filter.status = query.status;
+  if (query.clientId) filter.clientId = query.clientId;
+  if (query.dateFrom || query.dateTo) {
+    filter.quotationDate = {};
+    if (query.dateFrom) filter.quotationDate.$gte = parseDate(query.dateFrom, 'dateFrom');
+    if (query.dateTo) filter.quotationDate.$lte = endOfDay(parseDate(query.dateTo, 'dateTo'));
   }
-  if (!body.name) {
-    throw new QuotationError('Provide a saved client or inline client name.', 422, { clientId: 'Client is required.' });
+  if (query.amountMin || query.amountMax) {
+    const rows = await Quotation.find(filter);
+    const min = query.amountMin ? d(query.amountMin) : null;
+    const max = query.amountMax ? d(query.amountMax) : null;
+    const ids = rows
+      .filter((row) => {
+        const total = d(row.grandTotal);
+        if (min && total.lt(min)) return false;
+        if (max && total.gt(max)) return false;
+        return true;
+      })
+      .map((row) => row._id);
+    filter._id = { $in: ids };
   }
-  const client = new Client({
-    companyId,
-    ...Object.fromEntries(clientSnapshotFields.map((field) => [field, body[field]]).filter(([, value]) => value !== undefined)),
+  if (query.search) {
+    const pattern = new RegExp(escapeRegex(query.search), 'i');
+    const clients = await Client.find({ companyId: company._id, name: pattern }).select('_id');
+    filter.$or = [{ number: pattern }, { clientId: { $in: clients.map((client) => client._id) } }];
+  }
+
+  const sortField = ['quotationDate', 'number', 'status', 'createdAt'].includes(query.sort) ? query.sort : 'quotationDate';
+  const direction = query.direction === 'asc' ? 1 : -1;
+  const [rows, total] = await Promise.all([
+    Quotation.find(filter).sort({ [sortField]: direction, createdAt: -1 }).skip(skip).limit(perPage),
+    Quotation.countDocuments(filter),
+  ]);
+  return { rows: rows.map(presentDocument), meta: { currentPage: page, perPage, total } };
+}
+
+export async function getQuotation(id) {
+  const { quotation } = await findOwned(id);
+  return presentDocument(quotation);
+}
+
+export async function createQuotation(body) {
+  const company = await Company.current();
+  return withTransaction(async (session) => {
+    const client = await resolveClient(company, body, session);
+    const number = await takeNumber(company._id, 'quotation', session);
+    const [quotation] = await Quotation.create(
+      [
+        {
+          companyId: company._id,
+          number,
+          status: 'Draft',
+          ...buildPayload(company, client, body),
+        },
+      ],
+      { session }
+    );
+    return presentDocument(quotation);
   });
-  await client.save({ session });
-  return client;
 }
 
-async function validateItemReferences(items, companyId, session) {
-  for (const [index, item] of items.entries()) {
-    if (item.categoryId) {
-      const categoryExists = await Category.exists({ _id: item.categoryId, companyId }).session(session);
-      if (!categoryExists) {
-        throw new QuotationError(
-          'Quotation item has an invalid category.',
-          422,
-          { [`items.${index}.categoryId`]: 'Category not found for this company.' },
-        );
-      }
-    }
-    if (item.productId) {
-      const productExists = await Product.exists({ _id: item.productId, companyId }).session(session);
-      if (!productExists) {
-        throw new QuotationError(
-          'Quotation item has an invalid product.',
-          422,
-          { [`items.${index}.productId`]: 'Product not found for this company.' },
-        );
-      }
-    }
+export async function updateQuotation(id, body) {
+  const { company, quotation } = await findOwned(id);
+  if (quotation.convertedInvoiceId) throw new HttpError(422, 'A converted quotation cannot be edited');
+  const client = body.clientId || body.clientName || body.client ? await resolveClient(company, body) : null;
+  const payload = buildPayload(company, client || { _id: quotation.clientId, ...quotation.clientSnapshot, billingAddress: quotation.clientSnapshot?.billingAddress }, body);
+  payload.companySnapshot = quotation.companySnapshot;
+  if (!client || String(client._id) === String(quotation.clientId)) {
+    payload.clientId = quotation.clientId;
+    payload.clientSnapshot = quotation.clientSnapshot;
   }
+  Object.assign(quotation, payload);
+  await quotation.save();
+  return presentDocument(quotation);
 }
 
-async function nextQuotationNumber(company, session) {
-  const prefix = company.quotationPrefix || 'QUO';
-  const oldCompany = await Company.findOneAndUpdate(
-    { _id: company._id },
-    { $inc: { nextQuotationNumber: 1 } },
-    { new: false, session, runValidators: true },
-  );
-  if (!oldCompany) throw new QuotationError('Company is not seeded.', 404);
-  return `${prefix} ${oldCompany.nextQuotationNumber}`;
+export async function duplicateQuotation(id) {
+  const { company, quotation } = await findOwned(id);
+  return withTransaction(async (session) => {
+    const number = await takeNumber(company._id, 'quotation', session);
+    const [copy] = await Quotation.create(
+      [
+        {
+          companyId: company._id,
+          clientId: quotation.clientId,
+          number,
+          poSoNumber: quotation.poSoNumber,
+          header: quotation.header,
+          currency: quotation.currency,
+          quotationDate: quotation.quotationDate,
+          validUntil: quotation.validUntil,
+          status: 'Draft',
+          companySnapshot: quotation.companySnapshot,
+          clientSnapshot: quotation.clientSnapshot,
+          salutation: quotation.salutation,
+          message: quotation.message,
+          closing: quotation.closing,
+          signatory: quotation.signatory,
+          terms: quotation.terms,
+          notes: quotation.notes,
+          validityText: quotation.validityText,
+          items: quotation.items.map((item) => {
+            const json = item.toObject();
+            delete json._id;
+            return json;
+          }),
+          subtotal: quotation.subtotal,
+          discountTotal: quotation.discountTotal,
+          taxableAmount: quotation.taxableAmount,
+          taxTotal: quotation.taxTotal,
+          additionalCharges: quotation.additionalCharges,
+          grandTotal: quotation.grandTotal,
+          convertedInvoiceId: null,
+          archivedAt: null,
+        },
+      ],
+      { session }
+    );
+    return presentDocument(copy);
+  });
 }
 
-async function createQuotation({ body, companyId }) {
-  const session = await mongoose.startSession();
-  let created;
-  try {
-    await session.withTransaction(async () => {
-      const company = await Company.findById(companyId).session(session);
-      if (!company) throw new QuotationError('Company is not seeded.', 404);
-      const client = await resolveClient({ body, companyId, session });
-      await validateItemReferences(body.items, companyId, session);
-
-      const defaults = defaultDocumentFields(company);
-      const totals = calculateTotals(body.items, body.additionalCharges ?? '0');
-      const number = await nextQuotationNumber(company, session);
-      const documentFields = [
-        'poSoNumber', 'header', 'currency', 'quotationDate', 'validUntil',
-        'salutation', 'message', 'closing', 'signatory', 'terms', 'notes',
-        'validityText',
-      ];
-      const quotation = new Quotation({
-        companyId,
-        clientId: client._id,
-        number,
-        ...defaults,
-        ...Object.fromEntries(documentFields
-          .filter((field) => body[field] !== undefined)
-          .map((field) => [field, body[field]])),
-        status: 'Draft',
-        companySnapshot: snapshot(company, companySnapshotFields),
-        clientSnapshot: snapshot(client, clientSnapshotFields),
-        ...totals,
-      });
-      await quotation.save({ session });
-      created = quotation;
-    });
-    return created;
-  } finally {
-    await session.endSession();
+export async function changeStatus(id, status) {
+  if (!statusValues.includes(status)) {
+    throw new HttpError(422, 'Validation failed', { status: 'Choose a valid status' });
   }
-}
-
-async function updateQuotation({ quotationId, companyId, body }) {
-  const session = await mongoose.startSession();
-  let updated;
-  try {
-    await session.withTransaction(async () => {
-      const quotation = await Quotation.findOne({
-        _id: quotationId,
-        companyId,
-        archivedAt: null,
-      }).session(session);
-      if (!quotation) throw new QuotationError('Quotation not found.', 404);
-      if (quotation.convertedInvoiceId) {
-        throw new QuotationError('A converted quotation cannot be edited.', 422);
-      }
-      const company = await Company.findById(companyId).session(session);
-      if (!company) throw new QuotationError('Company is not seeded.', 404);
-      const client = await resolveClient({
-        body,
-        existingClientId: quotation.clientId,
-        companyId,
-        session,
-      });
-      const nextItems = body.items === undefined
-        ? quotation.items.map((item) => item.toObject())
-        : body.items;
-      await validateItemReferences(nextItems, companyId, session);
-      const totals = calculateTotals(
-        nextItems,
-        body.additionalCharges === undefined ? quotation.additionalCharges : body.additionalCharges,
-      );
-      const documentFields = [
-        'poSoNumber', 'header', 'currency', 'quotationDate', 'validUntil',
-        'salutation', 'message', 'closing', 'signatory', 'terms', 'notes',
-        'validityText',
-      ];
-      Object.assign(quotation, Object.fromEntries(documentFields
-        .filter((field) => body[field] !== undefined)
-        .map((field) => [field, body[field]])), {
-        ...(body.items !== undefined ? { items: body.items } : {}),
-        ...(body.additionalCharges !== undefined ? { additionalCharges: body.additionalCharges } : {}),
-        clientId: client._id,
-        companySnapshot: snapshot(company, companySnapshotFields),
-        clientSnapshot: snapshot(client, clientSnapshotFields),
-        ...totals,
-      });
-      await quotation.save({ session });
-      updated = quotation;
-    });
-    return updated;
-  } finally {
-    await session.endSession();
+  const { quotation } = await findOwned(id);
+  if (quotation.status === 'Converted' || quotation.convertedInvoiceId) {
+    throw new HttpError(422, 'A converted quotation cannot change status here');
   }
+  quotation.status = status;
+  await quotation.save();
+  return presentDocument(quotation);
 }
 
-async function duplicateQuotation({ quotationId, companyId }) {
-  const session = await mongoose.startSession();
-  let duplicated;
-  try {
-    await session.withTransaction(async () => {
-      const source = await Quotation.findOne({
-        _id: quotationId,
-        companyId,
-        archivedAt: null,
-      }).session(session);
-      if (!source) throw new QuotationError('Quotation not found.', 404);
-
-      const company = await Company.findById(companyId).session(session);
-      if (!company) throw new QuotationError('Company is not seeded.', 404);
-      const client = await Client.findOne({ _id: source.clientId, companyId }).session(session);
-      if (!client) throw new QuotationError('Client not found for this company.', 422);
-      const number = await nextQuotationNumber(company, session);
-
-      const data = source.toObject();
-      delete data._id;
-      delete data.createdAt;
-      delete data.updatedAt;
-      delete data.__v;
-      duplicated = new Quotation({
-        ...data,
-        number,
-        status: 'Draft',
-        convertedInvoiceId: null,
-        archivedAt: null,
-      });
-      await duplicated.save({ session });
-    });
-    return duplicated;
-  } finally {
-    await session.endSession();
-  }
+export async function archiveQuotation(id) {
+  const { quotation } = await findOwned(id);
+  quotation.archivedAt = new Date();
+  await quotation.save();
+  return presentDocument(quotation);
 }
-
-module.exports = {
-  QuotationError,
-  createQuotation,
-  updateQuotation,
-  duplicateQuotation,
-  defaultDocumentFields,
-};

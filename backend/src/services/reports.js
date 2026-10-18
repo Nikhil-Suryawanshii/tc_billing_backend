@@ -1,446 +1,254 @@
-const Decimal = require('decimal.js');
-const { Invoice, Payment, Quotation } = require('../models');
+import Quotation from '../models/Quotation.js';
+import Invoice from '../models/Invoice.js';
+import Payment from '../models/Payment.js';
+import Client from '../models/Client.js';
+import Product from '../models/Product.js';
+import Company from '../models/Company.js';
+import { d, money } from '../lib/money.js';
+import { endOfDay, parseDate } from '../lib/dates.js';
+import { refreshStatuses } from './status.js';
+import { HttpError } from '../lib/http.js';
 
-function money(value) {
-  return new Decimal(String(value || 0)).toFixed(2, Decimal.ROUND_HALF_UP);
+function inRange(filter, field, from, to) {
+  if (!from && !to) return;
+  filter[field] = {};
+  if (from) filter[field].$gte = parseDate(from, 'from');
+  if (to) filter[field].$lte = endOfDay(parseDate(to, 'to'));
 }
 
-function addMoney(values) {
-  return values.reduce((total, value) => total.plus(new Decimal(String(value || 0))), new Decimal(0))
-    .toFixed(2, Decimal.ROUND_HALF_UP);
+function sumBy(rows, pick) {
+  return money(rows.reduce((sum, row) => sum.plus(pick(row)), d(0)));
 }
 
-function dateRange(field, from, to) {
-  return { [field]: { $gte: from, $lte: to } };
-}
-
-function decimalField(field) {
-  return { $toDecimal: `$${field}` };
-}
-
-function lookupClient(clientExpression = '$clientId') {
-  return {
-    $lookup: {
-      from: 'clients',
-      let: { clientId: clientExpression, companyId: '$companyId' },
-      pipeline: [
-        { $match: { $expr: { $and: [{ $eq: ['$_id', '$$clientId'] }, { $eq: ['$companyId', '$$companyId'] }] } } },
-        { $project: { name: 1 } },
-      ],
-      as: 'client',
-    },
-  };
-}
-
-async function quotationReport(companyId, from, to, outcomesOnly = false) {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const rows = await Quotation.aggregate([
-    {
-      $match: {
-        companyId,
-        archivedAt: null,
-        ...dateRange('quotationDate', from, to),
-        ...(outcomesOnly ? { status: { $in: ['Accepted', 'Rejected', 'Converted'] } } : {}),
-      },
-    },
-    {
-      $addFields: {
-        reportStatus: {
-          $cond: [
-            {
-              $and: [
-                { $eq: ['$status', 'Sent'] },
-                { $ne: ['$validUntil', null] },
-                { $lt: ['$validUntil', today] },
-              ],
-            },
-            'Expired',
-            '$status',
-          ],
-        },
-      },
-    },
-    {
-      $group: {
-        _id: '$reportStatus',
-        count: { $sum: 1 },
-        total: { $sum: { $toDecimal: '$grandTotal' } },
-      },
-    },
-    { $project: { _id: 0, status: '$_id', count: 1, total: { $toString: '$total' } } },
-    { $sort: { status: 1 } },
+export async function dashboard() {
+  const company = await Company.current();
+  await refreshStatuses(company._id);
+  const companyId = company._id;
+  const [clients, products, quotations, invoices, payments] = await Promise.all([
+    Client.countDocuments({ companyId }),
+    Product.countDocuments({ companyId }),
+    Quotation.find({ companyId, archivedAt: null }),
+    Invoice.find({ companyId }),
+    Payment.find({ companyId }),
   ]);
-  const normalizedRows = rows.map((row) => ({ ...row, total: money(row.total) }));
+
+  const countStatus = (rows, status) => rows.filter((row) => row.status === status).length;
+  const openInvoices = invoices.filter((invoice) => !['Draft', 'Cancelled'].includes(invoice.status));
+  const recentQuotations = quotations
+    .slice()
+    .sort((a, b) => new Date(b.quotationDate) - new Date(a.quotationDate))
+    .slice(0, 5)
+    .map(brief);
+  const recentInvoices = invoices
+    .slice()
+    .sort((a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate))
+    .slice(0, 5)
+    .map(brief);
+
   return {
-    rows: normalizedRows,
-    summary: {
-      count: normalizedRows.reduce((total, row) => total + row.count, 0),
-      total: addMoney(normalizedRows.map((row) => row.total)),
+    clients,
+    products,
+    quotations: quotations.length,
+    quotationsAccepted: countStatus(quotations, 'Accepted'),
+    quotationsPending: countStatus(quotations, 'Draft') + countStatus(quotations, 'Sent'),
+    quotationsRejected: countStatus(quotations, 'Rejected'),
+    quotationsExpired: countStatus(quotations, 'Expired'),
+    invoices: invoices.length,
+    invoicesPaid: countStatus(invoices, 'Paid'),
+    invoicesUnpaid: invoices.filter((invoice) => ['Issued', 'Overdue'].includes(invoice.status)).length,
+    invoicesPartial: countStatus(invoices, 'Partially Paid'),
+    outstandingAmount: sumBy(openInvoices, (invoice) => invoice.balanceDue),
+    revenueReceived: sumBy(payments, (payment) => payment.amount),
+    recentQuotations,
+    recentInvoices,
+    monthlyRevenue: monthlyRevenue(payments),
+    conversion: {
+      accepted: countStatus(quotations, 'Accepted'),
+      rejected: countStatus(quotations, 'Rejected'),
+      converted: countStatus(quotations, 'Converted'),
     },
+    outstandingSummary: openInvoices
+      .filter((invoice) => d(invoice.balanceDue).gt(0))
+      .sort((a, b) => d(b.balanceDue).minus(d(a.balanceDue)).toNumber())
+      .slice(0, 5)
+      .map(brief),
   };
 }
 
-async function conversionReport(companyId, from, to) {
-  const [quotations, invoicesCreatedFromQuotations] = await Promise.all([
-    Quotation.aggregate([
-      {
-        $match: {
-          companyId,
-          archivedAt: null,
-          ...dateRange('quotationDate', from, to),
-          status: { $in: ['Accepted', 'Rejected', 'Converted'] },
-        },
-      },
-      { $group: { _id: '$status', count: { $sum: 1 } } },
-    ]),
-    Invoice.countDocuments({
-      companyId,
-      quotationId: { $ne: null },
-      ...dateRange('invoiceDate', from, to),
-    }),
-  ]);
-  const values = Object.fromEntries(['Accepted', 'Rejected', 'Converted'].map((status) => [
-    status.toLowerCase(),
-    quotations.find((row) => row._id === status)?.count || 0,
-  ]));
-  const rows = [
-    { metric: 'accepted', count: values.accepted },
-    { metric: 'rejected', count: values.rejected },
-    { metric: 'converted', count: values.converted },
-    { metric: 'invoicesCreatedFromQuotations', count: invoicesCreatedFromQuotations },
-  ];
-  return { rows, summary: { ...values, invoicesCreatedFromQuotations } };
-}
-
-async function salesReport(companyId, from, to) {
-  const rows = await Invoice.aggregate([
-    {
-      $match: {
-        companyId,
-        ...dateRange('invoiceDate', from, to),
-        status: { $nin: ['Draft', 'Cancelled'] },
-      },
-    },
-    lookupClient(),
-    {
-      $project: {
-        invoiceId: { $toString: '$_id' },
-        number: 1,
-        clientName: { $ifNull: [{ $arrayElemAt: ['$client.name', 0] }, '$clientSnapshot.name'] },
-        date: '$invoiceDate',
-        status: 1,
-        total: '$grandTotal',
-        amountPaid: 1,
-        balanceDue: 1,
-      },
-    },
-    { $sort: { date: -1, number: 1 } },
-  ]);
-  const normalizedRows = rows.map((row) => ({
-    ...row,
-    total: money(row.total),
-    amountPaid: money(row.amountPaid),
-    balanceDue: money(row.balanceDue),
-  }));
+function brief(doc) {
+  const json = doc.toJSON();
   return {
-    rows: normalizedRows,
-    summary: {
-      issuedSales: addMoney(normalizedRows.map((row) => row.total)),
-      paidAmount: addMoney(normalizedRows.map((row) => row.amountPaid)),
-      outstandingAmount: addMoney(normalizedRows.map((row) => row.balanceDue)),
-    },
+    id: json.id,
+    number: json.number,
+    clientName: json.clientSnapshot?.name || '',
+    date: json.quotationDate || json.invoiceDate || json.dueDate,
+    status: json.status,
+    total: json.grandTotal,
+    balanceDue: json.balanceDue,
   };
 }
 
-async function paymentsReport(companyId, from, to) {
-  const rows = await Payment.aggregate([
-    { $match: { companyId, ...dateRange('paymentDate', from, to) } },
-    {
-      $lookup: {
-        from: 'invoices',
-        let: { invoiceId: '$invoiceId', companyId: '$companyId' },
-        pipeline: [
-          { $match: { $expr: { $and: [{ $eq: ['$_id', '$$invoiceId'] }, { $eq: ['$companyId', '$$companyId'] }] } } },
-          { $project: { number: 1, clientId: 1, clientSnapshot: 1 } },
-        ],
-        as: 'invoice',
-      },
-    },
-    { $unwind: { path: '$invoice', preserveNullAndEmptyArrays: true } },
-    {
-      $lookup: {
-        from: 'clients',
-        let: { clientId: '$invoice.clientId', companyId: '$companyId' },
-        pipeline: [
-          { $match: { $expr: { $and: [{ $eq: ['$_id', '$$clientId'] }, { $eq: ['$companyId', '$$companyId'] }] } } },
-          { $project: { name: 1 } },
-        ],
-        as: 'client',
-      },
-    },
-    {
-      $project: {
-        paymentId: { $toString: '$_id' },
-        date: '$paymentDate',
-        invoiceNumber: '$invoice.number',
-        clientName: { $ifNull: [{ $arrayElemAt: ['$client.name', 0] }, '$invoice.clientSnapshot.name'] },
-        amount: 1,
-        method: 1,
-        reference: 1,
-      },
-    },
-    { $sort: { date: -1, paymentId: 1 } },
-  ]);
-  const normalizedRows = rows.map((row) => ({ ...row, amount: money(row.amount) }));
-  return {
-    rows: normalizedRows,
-    summary: { paidAmount: addMoney(normalizedRows.map((row) => row.amount)) },
-  };
-}
-
-async function invoiceBalanceReport(companyId, from, to, overdueOnly = false) {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const match = {
-    companyId,
-    status: { $nin: ['Draft', 'Cancelled'] },
-    ...dateRange(overdueOnly ? 'dueDate' : 'invoiceDate', from, to),
-    $expr: { $gt: [decimalField('balanceDue'), { $toDecimal: '0' }] },
-  };
-  if (overdueOnly) {
-    match.status = { $in: ['Issued', 'Partially Paid', 'Overdue'] };
-    match.dueDate.$lt = today;
+function monthlyRevenue(payments) {
+  const months = [];
+  const now = new Date();
+  for (let offset = 11; offset >= 0; offset -= 1) {
+    const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const amount = payments
+      .filter((payment) => {
+        const paid = new Date(payment.paymentDate);
+        return paid.getFullYear() === date.getFullYear() && paid.getMonth() === date.getMonth();
+      })
+      .reduce((sum, payment) => sum.plus(payment.amount), d(0));
+    months.push({ month: key, amount: money(amount) });
   }
-  const rows = await Invoice.aggregate([
-    { $match: match },
-    lookupClient(),
-    {
-      $project: {
-        invoiceId: { $toString: '$_id' },
-        number: 1,
-        clientName: { $ifNull: [{ $arrayElemAt: ['$client.name', 0] }, '$clientSnapshot.name'] },
-        invoiceDate: 1,
-        dueDate: 1,
-        status: overdueOnly ? { $literal: 'Overdue' } : '$status',
-        grandTotal: 1,
-        amountPaid: 1,
-        balanceDue: 1,
-      },
-    },
-    { $sort: { dueDate: 1, number: 1 } },
+  return months;
+}
+
+export async function report(slug, query) {
+  const company = await Company.current();
+  await refreshStatuses(company._id);
+  const companyId = company._id;
+  const quotationFilter = { companyId, archivedAt: null };
+  const invoiceFilter = { companyId };
+  const paymentFilter = { companyId };
+  inRange(quotationFilter, 'quotationDate', query.from, query.to);
+  inRange(invoiceFilter, 'invoiceDate', query.from, query.to);
+  inRange(paymentFilter, 'paymentDate', query.from, query.to);
+
+  const [quotations, invoices, payments] = await Promise.all([
+    Quotation.find(quotationFilter),
+    Invoice.find(invoiceFilter),
+    Payment.find(paymentFilter),
   ]);
-  const normalizedRows = rows.map((row) => ({
-    ...row,
-    grandTotal: money(row.grandTotal),
-    amountPaid: money(row.amountPaid),
-    balanceDue: money(row.balanceDue),
-  }));
+  const issued = invoices.filter((invoice) => !['Draft', 'Cancelled'].includes(invoice.status));
+  const issuedSales = sumBy(issued, (invoice) => invoice.grandTotal);
+  const paidAmount = sumBy(payments, (payment) => payment.amount);
+  const outstanding = sumBy(issued, (invoice) => invoice.balanceDue);
+
+  if (slug === 'quotations') {
+    return groupCount(quotations, issuedSales, paidAmount, outstanding);
+  }
+  if (slug === 'quotation-outcomes') {
+    return {
+      accepted: quotations.filter((row) => row.status === 'Accepted').length,
+      rejected: quotations.filter((row) => row.status === 'Rejected').length,
+      converted: quotations.filter((row) => row.status === 'Converted').length,
+      issuedSales,
+      paidAmount,
+      outstanding,
+    };
+  }
+  if (slug === 'conversion') {
+    const accepted = quotations.filter((row) => ['Accepted', 'Converted'].includes(row.status)).length;
+    return { accepted, converted: quotations.filter((row) => row.status === 'Converted').length, issuedSales, paidAmount, outstanding };
+  }
+  if (slug === 'sales') return { rows: issued.map(briefInvoice), issuedSales, paidAmount, outstanding };
+  if (slug === 'payments') return { rows: payments.map((payment) => payment.toJSON()), issuedSales, paidAmount, outstanding };
+  if (slug === 'outstanding') {
+    const rows = issued.filter((invoice) => d(invoice.balanceDue).gt(0)).map(briefInvoice);
+    return { rows, issuedSales, paidAmount, outstanding };
+  }
+  if (slug === 'overdue') {
+    const rows = invoices.filter((invoice) => invoice.status === 'Overdue').map(briefInvoice);
+    return { rows, issuedSales, paidAmount, outstanding: sumBy(invoices.filter((invoice) => invoice.status === 'Overdue'), (invoice) => invoice.balanceDue) };
+  }
+  if (slug === 'clients') return { rows: clientRows(issued, payments), issuedSales, paidAmount, outstanding };
+  if (slug === 'products') return { rows: productRows(issued), issuedSales, paidAmount, outstanding };
+  if (slug === 'revenue') {
+    const months = monthlyRevenue(payments).filter((month) => {
+      if (!query.from && !query.to) return true;
+      return true;
+    });
+    return { rows: months, yearlyTotal: paidAmount, issuedSales, paidAmount, outstanding };
+  }
+  throw new HttpError(404, 'Report not found');
+}
+
+function groupCount(quotations, issuedSales, paidAmount, outstanding) {
+  const statuses = ['Draft', 'Sent', 'Accepted', 'Rejected', 'Expired', 'Converted'];
   return {
-    rows: normalizedRows,
-    summary: {
-      issuedSales: addMoney(normalizedRows.map((row) => row.grandTotal)),
-      paidAmount: addMoney(normalizedRows.map((row) => row.amountPaid)),
-      outstandingAmount: addMoney(normalizedRows.map((row) => row.balanceDue)),
-    },
+    rows: statuses.map((status) => ({
+      status,
+      count: quotations.filter((row) => row.status === status).length,
+      total: sumBy(quotations.filter((row) => row.status === status), (row) => row.grandTotal),
+    })),
+    issuedSales,
+    paidAmount,
+    outstanding,
   };
 }
 
-async function clientsReport(companyId, from, to) {
-  const rows = await Invoice.aggregate([
-    {
-      $match: {
-        companyId,
-        ...dateRange('invoiceDate', from, to),
-        status: { $nin: ['Draft', 'Cancelled'] },
-      },
-    },
-    {
-      $group: {
-        _id: '$clientId',
-        sales: { $sum: { $toDecimal: '$grandTotal' } },
-        outstanding: { $sum: { $toDecimal: '$balanceDue' } },
-        invoices: { $sum: 1 },
-      },
-    },
-    { $sort: { sales: -1, _id: 1 } },
-    {
-      $lookup: {
-        from: 'clients',
-        let: { clientId: '$_id', companyId },
-        pipeline: [
-          { $match: { $expr: { $and: [{ $eq: ['$_id', '$$clientId'] }, { $eq: ['$companyId', '$$companyId'] }] } } },
-          { $project: { name: 1 } },
-        ],
-        as: 'client',
-      },
-    },
-    {
-      $lookup: {
-        from: 'invoices',
-        let: { clientId: '$_id', companyId },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ['$clientId', '$$clientId'] },
-                  { $eq: ['$companyId', '$$companyId'] },
-                  { $gte: ['$invoiceDate', from] },
-                  { $lte: ['$invoiceDate', to] },
-                  { $not: [{ $in: ['$status', ['Draft', 'Cancelled']] }] },
-                ],
-              },
-            },
-          },
-          {
-            $lookup: {
-              from: 'payments',
-              let: { invoiceId: '$_id', companyId: '$companyId' },
-              pipeline: [
-                {
-                  $match: {
-                    $expr: {
-                      $and: [
-                        { $eq: ['$invoiceId', '$$invoiceId'] },
-                        { $eq: ['$companyId', '$$companyId'] },
-                        { $gte: ['$paymentDate', from] },
-                        { $lte: ['$paymentDate', to] },
-                      ],
-                    },
-                  },
-                },
-              ],
-              as: 'payments',
-            },
-          },
-          { $unwind: { path: '$payments', preserveNullAndEmptyArrays: true } },
-          {
-            $group: {
-              _id: null,
-              paid: { $sum: { $ifNull: [{ $toDecimal: '$payments.amount' }, { $toDecimal: '0' }] } },
-            },
-          },
-        ],
-        as: 'paymentTotals',
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        clientId: { $toString: '$_id' },
-        clientName: { $ifNull: [{ $arrayElemAt: ['$client.name', 0] }, 'Unknown client'] },
-        sales: { $toString: '$sales' },
-        paid: { $toString: { $ifNull: [{ $arrayElemAt: ['$paymentTotals.paid', 0] }, { $toDecimal: '0' }] } },
-        outstanding: { $toString: '$outstanding' },
-        invoices: 1,
-      },
-    },
-  ]);
-  const normalizedRows = rows.map((row) => ({
-    ...row,
-    sales: money(row.sales),
-    paid: money(row.paid),
+function briefInvoice(invoice) {
+  return {
+    id: invoice.id,
+    number: invoice.number,
+    clientName: invoice.clientSnapshot?.name || '',
+    date: invoice.invoiceDate,
+    dueDate: invoice.dueDate,
+    status: invoice.status,
+    total: invoice.grandTotal,
+    amountPaid: invoice.amountPaid,
+    balanceDue: invoice.balanceDue,
+  };
+}
+
+function clientRows(invoices, payments) {
+  const groups = new Map();
+  invoices.forEach((invoice) => {
+    const key = String(invoice.clientId);
+    const current = groups.get(key) || { clientName: invoice.clientSnapshot?.name || 'Client', issuedSales: d(0), paidAmount: d(0), outstanding: d(0) };
+    current.issuedSales = current.issuedSales.plus(invoice.grandTotal);
+    current.outstanding = current.outstanding.plus(invoice.balanceDue);
+    groups.set(key, current);
+  });
+  payments.forEach((payment) => {
+    const invoice = invoices.find((row) => String(row._id) === String(payment.invoiceId));
+    if (!invoice) return;
+    const current = groups.get(String(invoice.clientId));
+    if (current) current.paidAmount = current.paidAmount.plus(payment.amount);
+  });
+  return [...groups.values()].map((row) => ({
+    clientName: row.clientName,
+    issuedSales: money(row.issuedSales),
+    paidAmount: money(row.paidAmount),
     outstanding: money(row.outstanding),
   }));
-  return {
-    rows: normalizedRows,
-    summary: {
-      issuedSales: addMoney(normalizedRows.map((row) => row.sales)),
-      paidAmount: addMoney(normalizedRows.map((row) => row.paid)),
-      outstandingAmount: addMoney(normalizedRows.map((row) => row.outstanding)),
-    },
-  };
 }
 
-async function productsReport(companyId, from, to) {
-  const rows = await Invoice.aggregate([
-    {
-      $match: {
-        companyId,
-        ...dateRange('invoiceDate', from, to),
-        status: { $nin: ['Draft', 'Cancelled'] },
-      },
-    },
-    { $unwind: '$items' },
-    {
-      $group: {
-        _id: '$items.name',
-        quantity: { $sum: { $toDecimal: '$items.quantity' } },
-        lineTotal: { $sum: { $toDecimal: '$items.lineTotal' } },
-        occurrences: { $sum: 1 },
-      },
-    },
-    { $sort: { lineTotal: -1, _id: 1 } },
-    {
-      $project: {
-        _id: 0,
-        itemName: '$_id',
-        quantity: { $toString: '$quantity' },
-        lineTotal: { $toString: '$lineTotal' },
-        occurrences: 1,
-      },
-    },
-  ]);
-  const normalizedRows = rows.map((row) => ({ ...row, lineTotal: money(row.lineTotal) }));
-  return {
-    rows: normalizedRows,
-    summary: { issuedSales: addMoney(normalizedRows.map((row) => row.lineTotal)) },
-  };
+function productRows(invoices) {
+  const groups = new Map();
+  invoices.forEach((invoice) => {
+    invoice.items.forEach((item) => {
+      const key = item.name;
+      const current = groups.get(key) || { name: item.name, quantity: d(0), total: d(0) };
+      current.quantity = current.quantity.plus(item.quantity);
+      current.total = current.total.plus(item.lineTotal);
+      groups.set(key, current);
+    });
+  });
+  return [...groups.values()].map((row) => ({
+    name: row.name,
+    quantity: money(row.quantity),
+    total: money(row.total),
+  }));
 }
 
-async function revenueReport(companyId, from, to) {
-  const rows = await Payment.aggregate([
-    { $match: { companyId, ...dateRange('paymentDate', from, to) } },
-    {
-      $group: {
-        _id: { $dateToString: { format: '%Y-%m', date: '$paymentDate', timezone: 'UTC' } },
-        amount: { $sum: { $toDecimal: '$amount' } },
-      },
-    },
-    { $project: { _id: 0, month: '$_id', amount: { $toString: '$amount' } } },
-    { $sort: { month: 1 } },
-  ]);
-  const amountByMonth = new Map(rows.map((row) => [row.month, money(row.amount)]));
-  const months = [];
-  const cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1));
-  const lastMonth = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
-  while (cursor <= lastMonth) {
-    months.push(cursor.toISOString().slice(0, 7));
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-  }
-  const normalizedRows = months.map((month) => ({ month, amount: amountByMonth.get(month) || '0.00' }));
-  return {
-    rows: normalizedRows,
-    summary: { total: addMoney(normalizedRows.map((row) => row.amount)) },
-  };
+export function toCsv(slug, data) {
+  const rows = data.rows || [];
+  if (!rows.length) return 'message\nNo rows\n';
+  const headers = Object.keys(rows[0]);
+  const lines = [headers.join(',')];
+  rows.forEach((row) => {
+    lines.push(headers.map((header) => csvCell(row[header])).join(','));
+  });
+  lines.push(`issuedSales,${data.issuedSales || ''}`);
+  lines.push(`paidAmount,${data.paidAmount || ''}`);
+  lines.push(`outstanding,${data.outstanding || ''}`);
+  return `${lines.join('\n')}\n`;
 }
 
-async function getReport(slug, companyId, from, to) {
-  switch (slug) {
-    case 'quotations':
-      return quotationReport(companyId, from, to);
-    case 'quotation-outcomes':
-      return quotationReport(companyId, from, to, true);
-    case 'conversion':
-      return conversionReport(companyId, from, to);
-    case 'sales':
-      return salesReport(companyId, from, to);
-    case 'payments':
-      return paymentsReport(companyId, from, to);
-    case 'outstanding':
-      return invoiceBalanceReport(companyId, from, to);
-    case 'overdue':
-      return invoiceBalanceReport(companyId, from, to, true);
-    case 'clients':
-      return clientsReport(companyId, from, to);
-    case 'products':
-      return productsReport(companyId, from, to);
-    case 'revenue':
-      return revenueReport(companyId, from, to);
-    default:
-      return null;
-  }
+function csvCell(value) {
+  const text = value instanceof Date ? value.toISOString() : value ?? '';
+  return `"${String(text).replaceAll('"', '""')}"`;
 }
-
-module.exports = { getReport, money, addMoney };
